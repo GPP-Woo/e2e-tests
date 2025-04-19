@@ -5,6 +5,7 @@ import { ensureLoggedIn as ensureLoggedInInApp } from '../login-helpers/gpp-app'
 import { login as ensureLoggedInMaykin } from '../login-helpers/maykin'
 
 export const adminState = './.auth/admin.json'
+export const regularUserState = './.auth/regular-user.json'
 
 export async function ensureLoggedIn(page: Page, loginParams?: LoginParams) {
   const url = page.url()

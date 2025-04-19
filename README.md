@@ -6,10 +6,10 @@ Please use vscode and install the recommended extensions.
 
 To run the tests, you will need a `.env` file in the root of this repository. See `.env.example` for an example.
 
-To start the test ui, run the following commands:
+To run the tests, run the following commands:
 
 ```sh
 npm install
-npx playwright install
-npx playwright test --ui
+npx playwright install --with-deps
+npm run test
 ```
