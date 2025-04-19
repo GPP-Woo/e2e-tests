@@ -14,27 +14,14 @@ function createUser({
   password: string
   otpSecret: string
 }) {
-  let currentOtp = ''
-
   const totp = new TOTP({
     secret: Secret.fromBase32(otpSecret),
   })
 
-  function getOtp() {
-    if (!currentOtp) {
-      currentOtp = totp.generate()
-      setTimeout(() => {
-        currentOtp = ''
-      }, OTP_TIMEOUT_MS)
-    }
-
-    return currentOtp
-  }
-
   return Object.freeze({
     email,
     password,
-    getOtp,
+    getOtp: () => totp.generate(),
   })
 }
 

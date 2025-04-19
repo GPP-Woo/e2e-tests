@@ -14,6 +14,7 @@ export async function login(page: Page, loginParams: LoginParams | undefined) {
     .or(beheerLocator)
     .or(icattLink)
     .or(email)
+    .first()
     .waitFor()
 
   if (await beheerLocator.isVisible()) {
@@ -22,6 +23,7 @@ export async function login(page: Page, loginParams: LoginParams | undefined) {
       .or(dashboardLocator)
       .or(icattLink)
       .or(email)
+      .first()
       .waitFor()
   }
 
@@ -30,6 +32,7 @@ export async function login(page: Page, loginParams: LoginParams | undefined) {
     await dashboardLocator
       .or(icattLink)
       .or(email)
+      .first()
       .waitFor()
   }
   if (await icattLink.isVisible()) {
