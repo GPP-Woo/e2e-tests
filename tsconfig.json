@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"] // This mapping is relative to "baseUrl".
+    },
+    "esModuleInterop": true
+  },
+  "include": [
+    "tests",
+    "setup",
+    "login-helpers",
+    "environment.ts",
+    "auth.playwright.config.ts",
+    "playwright.config.ts"
+  ]
+}
