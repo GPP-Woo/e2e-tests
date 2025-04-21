@@ -24,6 +24,7 @@ export default defineConfig({
   use: {
     trace: 'off',
   },
+  reporter: process.env.CI ? [['dot'], ['github']] : undefined,
   /* Configure projects for major browsers */
   projects: [
     {

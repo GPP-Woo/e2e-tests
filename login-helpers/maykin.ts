@@ -35,14 +35,14 @@ export async function login(page: Page, loginParams: LoginParams | undefined) {
       .first()
       .waitFor()
   }
+
   if (await icattLink.isVisible()) {
     await icattLink.click()
     await email.or(dashboardLocator).isVisible()
   }
+
   if (await email.isVisible()) {
     await loginToAzureEntraId(page, loginParams)
+    await dashboardLocator.waitFor()
   }
-  if (await oidcLocator.isVisible())
-    return false
-  return !loginParams?.asAdmin || dashboardLocator.isVisible()
 }
