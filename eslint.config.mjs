@@ -5,6 +5,7 @@ export default antfu({
   typescript: {
     overrides: {
       'ts/no-floating-promises': 'error',
+      'ts/await-thenable': 'error',
     },
     parserOptions: {
       projectService: true,

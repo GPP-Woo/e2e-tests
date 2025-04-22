@@ -3,8 +3,6 @@ import type { LoginParams } from './types'
 import { Secret, TOTP } from 'otpauth'
 import environment from '../environment'
 
-const OTP_TIMEOUT_MS = 30_000
-
 function createUser({
   email,
   password,
