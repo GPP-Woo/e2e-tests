@@ -17,3 +17,4 @@ jobs:
         run: npm ci
       - name: lint & typecheck
         run: npm run typecheck && npm run lint
+# make sure it is run
