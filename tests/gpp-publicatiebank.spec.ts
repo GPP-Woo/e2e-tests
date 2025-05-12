@@ -67,6 +67,7 @@ test('filter "Alle" shows all items sorted alphabetically', async ({ page }) => 
 
   // Check alphabetical order
   const sortedValues = [...values].sort((a, b) => a.localeCompare(b))
+
   expect(values).toEqual(sortedValues)
 })
 
