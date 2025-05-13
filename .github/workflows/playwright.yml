@@ -16,7 +16,7 @@ jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    environment: woo kubernetes test enviroment
+    environment: maykin and icatt dev environments
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
