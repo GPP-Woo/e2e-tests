@@ -42,7 +42,7 @@ jobs:
         with:
           path: playwright-report/
   deploy:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     needs: test
     environment:
       name: github-pages
