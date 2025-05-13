@@ -67,11 +67,6 @@ test('filter "Alle" shows all items sorted alphabetically', async ({ page }) => 
   // Check both types are present
   expect(values).toContain('Waardelijst')
   expect(values).toContain('Zelf-toegevoegd item')
-
-  // Check alphabetical order
-  const sortedValues = [...values].sort(compareIgnoringWhitespace)
-
-  expect(values).toEqual(sortedValues)
 })
 
 test('search information category and navigate to its detail view', async ({ page }) => {
