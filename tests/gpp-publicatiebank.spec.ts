@@ -91,10 +91,10 @@ test('search information category and navigate to its detail view', async ({ pag
 test('sort information category based on Naam column', async ({ page }) => {
   await goToInformatiecategorieen(page)
   await page.getByRole('link', { name: 'Naam' }).click()
-  await page.getByRole('link', { name: 'Sortering aan/uit' }).click()
-  await page.getByRole('link', { name: 'Sortering aan/uit' }).click()
-
-  await page.waitForTimeout(1000)
+  const sortLink = page.getByRole('link', { name: 'Sortering aan/uit' })
+  // click twice to sort alphabetically ascending
+  await sortLink.click()
+  await sortLink.click()
 
   // Get all name values from the table rows
   const naamLinks = await page.locator('th.field-naam a').all()
