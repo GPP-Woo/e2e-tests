@@ -16,7 +16,7 @@ jobs:
   test:
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    environment: woo kubernetes test enviroment
+    environment: maykin and icatt dev environments
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,7 +42,7 @@ jobs:
         with:
           path: playwright-report/
   deploy:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     needs: test
     environment:
       name: github-pages
