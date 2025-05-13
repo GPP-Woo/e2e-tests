@@ -2,6 +2,9 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { login } from '../login-helpers/login-to-gpp-publicatiebank.spec'
 
+const removeWhitespace = (s: string) => s.replace(/\s+/g, '')
+const compareIgnoringWhitespace = (a: string, b: string) => removeWhitespace(a).localeCompare(removeWhitespace(b))
+
 test('navigate and validate table headers', async ({ page }) => {
   await login(page)
 
@@ -57,7 +60,7 @@ test('filter "Alle" shows all items sorted alphabetically', async ({ page }) => 
   for (let i = 0; i < count; i++) {
     const text = await oorsprongCells.nth(i).textContent()
     if (text) {
-      values.push(text.trim())
+      values.push(text)
     }
   }
 
@@ -66,7 +69,7 @@ test('filter "Alle" shows all items sorted alphabetically', async ({ page }) => 
   expect(values).toContain('Zelf-toegevoegd item')
 
   // Check alphabetical order
-  const sortedValues = [...values].sort((a, b) => a.localeCompare(b))
+  const sortedValues = [...values].sort(compareIgnoringWhitespace)
 
   expect(values).toEqual(sortedValues)
 })
@@ -96,7 +99,7 @@ test('sort information category based on Naam column', async ({ page }) => {
   const names = await Promise.all(naamLinks.map(async el => (await el.textContent())?.trim() || ''))
 
   // Copy and sort for comparison
-  const sortedNames = [...names].sort((a, b) => a.localeCompare(b))
+  const sortedNames = [...names].sort(compareIgnoringWhitespace)
 
   // Assert sorted order
   expect(names).toEqual(sortedNames)
