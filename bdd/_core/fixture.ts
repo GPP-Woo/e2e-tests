@@ -1,8 +1,11 @@
 import type { ConfigSnapshot } from '@/bdd/@burgerportaal/support/beheer-config'
+import type { AdminDriver } from '@/bdd/@publicatiebank/support/admin-driver'
 import type { Stagehand } from '@browserbasehq/stagehand'
 import type { AppName, User } from './types'
 import { BeheerConfigClient } from '@/bdd/@burgerportaal/support/beheer-config'
 import { deleteUsergroupByName, usergroupExists } from '@/bdd/@gpp-app/support/usergroup'
+import { adminDriver } from '@/bdd/@publicatiebank/support/admin-driver'
+import { ORGANISATION_ADMIN, PUBLICATION_ADMIN, TOPIC_ADMIN } from '@/bdd/@publicatiebank/support/admin-uis'
 import { addSelfAddedCategory, deleteCategoryByName } from '@/bdd/@publicatiebank/support/information-category'
 import { OdrcClient } from '@/bdd/@publicatiebank/support/odrc'
 import { addSelfAddedOrganisation, deleteOrganisationByName } from '@/bdd/@publicatiebank/support/organisation'
@@ -168,6 +171,16 @@ interface BddFixtures {
    */
   adminStagehand: Stagehand
   /**
+   * Django-admin CRUD driver for organisaties, bound to `adminStagehand`.
+   * Steps receive it ready-built (`async ({ orgAdmin }) => …`) instead of
+   * reconstructing the driver each step. See {@link AdminDriver}.
+   */
+  orgAdmin: AdminDriver
+  /** Django-admin CRUD driver for onderwerpen, bound to `adminStagehand`. */
+  topicAdmin: AdminDriver
+  /** Django-admin CRUD driver for publicaties, bound to `adminStagehand`. */
+  pubAdmin: AdminDriver
+  /**
    * Authenticated burgerportaal beheer config client. Snapshots the config on
    * setup and restores it in teardown, so a scenario owns (and cleans up) every
    * change it makes — safe against shared/production environments.
@@ -319,6 +332,18 @@ export const test = base.extend<BddFixtures>({
     })
     await use(stagehand)
     await stagehand.close()
+  },
+  // Page-object drivers bound to the shared adminStagehand browser. Lazy: only
+  // the noun a scenario destructures is built, and all three share one browser
+  // if a scenario needs more than one.
+  orgAdmin: async ({ adminStagehand }, use) => {
+    await use(adminDriver(adminStagehand, ORGANISATION_ADMIN))
+  },
+  topicAdmin: async ({ adminStagehand }, use) => {
+    await use(adminDriver(adminStagehand, TOPIC_ADMIN))
+  },
+  pubAdmin: async ({ adminStagehand }, use) => {
+    await use(adminDriver(adminStagehand, PUBLICATION_ADMIN))
   },
   // Depends on no other fixtures; builds its own authenticated API context.
   // eslint-disable-next-line no-empty-pattern

@@ -1,14 +1,12 @@
-import type { Stagehand } from '@browserbasehq/stagehand'
-import { adminDriver } from '@/bdd/@publicatiebank/support/admin-driver'
 import { TOPIC_IMAGE, topicExists, topicIsPromoted, topicOmschrijving } from '@/bdd/@publicatiebank/support/topic'
-import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
 /**
  * Testscript 3 (onderwerpen) steps. UI *mutations* run through the Django admin
- * via Stagehand `act()` behind the shared {@link adminDriver} seam — except the
- * mandatory afbeelding on the add form, whose bytes are set straight on the
+ * via Stagehand `act()` behind the `topicAdmin` fixture (a ready-built
+ * {@link AdminDriver} bound to `adminStagehand`) — except the mandatory
+ * afbeelding on the add form, whose bytes are set straight on the
  * <input type=file> (a CDP browser cannot drive an OS file-picker). Assertions
  * are made *deterministically* by reading the admin back through the ordinary
  * Playwright `page` (session-authenticated, stable), because the token API is
@@ -19,17 +17,10 @@ import { Given, Then, When } from '../../_core/fixture'
  * with the organisatie steps (see steps.ts).
  */
 
-const pub = ENV.apps.publicatiebank.replace(/\/$/, '')
-const TOPIC_CHANGELIST = `${pub}/admin/publications/topic/`
-const TOPIC_ADD = `${pub}/admin/publications/topic/add/`
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
 
-function onderwerp(stagehand: Stagehand) {
-  return adminDriver(stagehand, { noun: 'onderwerp', changelist: TOPIC_CHANGELIST, add: TOPIC_ADD })
-}
-
-Given('the publicatiebank onderwerp admin is open', async ({ adminStagehand }) => {
-  await onderwerp(adminStagehand).openList()
+Given('the publicatiebank onderwerp admin is open', async ({ topicAdmin }) => {
+  await topicAdmin.openList()
 })
 
 // Prerequisite (deterministic, not the action under test).
@@ -39,15 +30,14 @@ Given('an onderwerp', async ({ topics }) => {
 
 // --- Add (Stagehand for fields; image via setInputFiles carve-out) ----------
 
-When('I add an onderwerp through the admin', async ({ adminStagehand, topics }) => {
+When('I add an onderwerp through the admin', async ({ topicAdmin, topics }) => {
   const titel = topics.freshName()
-  const d = onderwerp(adminStagehand)
-  await d.openAdd()
+  await topicAdmin.openAdd()
   // File carve-out: set the required afbeelding bytes directly on the input.
-  await d.page.locator('#id_afbeelding').setInputFiles(TOPIC_IMAGE)
-  await d.act(`Fill the "Officiële titel" field with: ${titel}`)
-  await d.act('Select "Concept" as the publicatiestatus')
-  await d.save()
+  await topicAdmin.page.locator('#id_afbeelding').setInputFiles(TOPIC_IMAGE)
+  await topicAdmin.act(`Fill the "Officiële titel" field with: ${titel}`)
+  await topicAdmin.act('Select "Concept" as the publicatiestatus')
+  await topicAdmin.save()
   topics.track(titel)
 })
 
@@ -58,11 +48,10 @@ Then('the onderwerp exists in the API', async ({ page, topics }) => {
 
 // --- Promote ---------------------------------------------------------------
 
-When('I tick the {string} checkbox and save the onderwerp', async ({ adminStagehand, topics }, label: string) => {
-  const d = onderwerp(adminStagehand)
-  await d.open(topics.last())
-  await d.act(`Tick the "${label}" checkbox`)
-  await d.save()
+When('I tick the {string} checkbox and save the onderwerp', async ({ topicAdmin, topics }, label: string) => {
+  await topicAdmin.open(topics.last())
+  await topicAdmin.act(`Tick the "${label}" checkbox`)
+  await topicAdmin.save()
 })
 
 Then('the onderwerp is promoted in the API', async ({ page, topics }) => {
@@ -72,13 +61,12 @@ Then('the onderwerp is promoted in the API', async ({ page, topics }) => {
 
 // --- Edit omschrijving -----------------------------------------------------
 
-When('I change the onderwerp omschrijving and save it', async ({ adminStagehand, topics, scratch }) => {
+When('I change the onderwerp omschrijving and save it', async ({ topicAdmin, topics, scratch }) => {
   const omschrijving = `E2E gewijzigde omschrijving ${Date.now()}`
   scratch.set('topic:omschrijving', omschrijving)
-  const d = onderwerp(adminStagehand)
-  await d.open(topics.last())
-  await d.act(`Replace the contents of the "Omschrijving" field with: ${omschrijving}`)
-  await d.save()
+  await topicAdmin.open(topics.last())
+  await topicAdmin.act(`Replace the contents of the "Omschrijving" field with: ${omschrijving}`)
+  await topicAdmin.save()
 })
 
 Then('the onderwerp has the new omschrijving in the API', async ({ page, topics, scratch }) => {
@@ -89,10 +77,9 @@ Then('the onderwerp has the new omschrijving in the API', async ({ page, topics,
 
 // --- Delete ----------------------------------------------------------------
 
-When('I delete the onderwerp through the admin', async ({ adminStagehand, topics }) => {
-  const d = onderwerp(adminStagehand)
-  await d.open(topics.last())
-  await d.removeCurrent()
+When('I delete the onderwerp through the admin', async ({ topicAdmin, topics }) => {
+  await topicAdmin.open(topics.last())
+  await topicAdmin.removeCurrent()
 })
 
 Then('the onderwerp no longer exists in the API', async ({ page, topics }) => {
@@ -102,8 +89,8 @@ Then('the onderwerp no longer exists in the API', async ({ page, topics }) => {
 
 // --- Search (UI read under test) -------------------------------------------
 
-When('I search the admin for the onderwerp', async ({ adminStagehand, topics }) => {
-  await onderwerp(adminStagehand).search(topics.last())
+When('I search the admin for the onderwerp', async ({ topicAdmin, topics }) => {
+  await topicAdmin.search(topics.last())
 })
 
 Then('the onderwerp is shown in the admin results', async ({ page, topics }) => {
