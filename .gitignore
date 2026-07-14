@@ -135,6 +135,9 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Playwright BDD generated specs
+.features-gen/
+
 # Playwright
 /test-results/
 /playwright-report/

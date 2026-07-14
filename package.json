@@ -17,9 +17,18 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "npx playwright test -c auth.playwright.config.ts && npx playwright test"
+    "bddgen": "bddgen",
+    "test": "bddgen && playwright test",
+    "test:ui": "bddgen && playwright test --ui",
+    "test:admin": "bddgen && playwright test --grep @admin",
+    "test:gpp-app": "bddgen && playwright test --grep @gpp-app",
+    "test:publicatiebank": "bddgen && playwright test --grep @publicatiebank",
+    "test:burgerportaal": "bddgen && playwright test --grep @burgerportaal",
+    "test:beheer": "bddgen && playwright test --grep @beheer"
   },
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.6.0",
+    "openai": "^4.104.0",
     "otpauth": "^9.4.0",
     "zod": "^3.24.3"
   },
@@ -30,6 +39,7 @@
     "dotenv": "^16.5.0",
     "eslint": "^9.24.0",
     "eslint-plugin-format": "^1.0.1",
+    "playwright-bdd": "^9.2.0",
     "typescript": "^5.8.3"
   }
 }

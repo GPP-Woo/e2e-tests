@@ -8,11 +8,8 @@
     "skipLibCheck": true
   },
   "include": [
-    "tests",
+    "bdd",
     "setup",
-    "login-helpers",
-    "environment.ts",
-    "auth.playwright.config.ts",
     "playwright.config.ts"
   ]
 }
