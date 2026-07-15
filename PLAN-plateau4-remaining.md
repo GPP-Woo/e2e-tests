@@ -5,15 +5,81 @@
 | TS                           | Status               | Where                                                                                                                    |
 | ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | TS5 gebruikersgroepen        | ✅ GREEN             | `bdd/@gpp-app/gebruikersgroepen.feature` (Stagehand mutate, odpc-API verify/clean)                                       |
-| TS6 publicatie creëren       | ⛔ PARKED `@blocked` | `bdd/@gpp-app/publicaties.feature` — no authorised gebruikersgroep membership (`/api/mijn-gebruikersgroepen` = `[]`)     |
-| TS7 publicatie wijzig/intrek | ⛔ PARKED `@blocked` | same file — same blocker                                                                                                 |
-| TS8 document beheer          | ⛔ PARKED `@blocked` | `bdd/@publicatiebank/@admin/documenten.feature` — no Documents API configured                                            |
+| TS6 publicatie creëren       | ✅ GREEN             | `bdd/@gpp-app/publicaties.feature` — unblocked (see below)                                                               |
+| TS7 publicatie intrekken     | ✅ GREEN             | same file — create-then-withdraw via the gpp-app SPA                                                                     |
+| TS8 document beheer          | ✅ GREEN             | `bdd/@publicatiebank/@admin/documenten.feature` — unblocked via provisioning + a token-auth fix (see TS8 note)           |
 | TS9 publicatie beheer        | ✅ GREEN             | `bdd/@publicatiebank/@admin/publicaties.feature` (Stagehand mutate via admin, admin-read verify)                         |
 | TS11 zoeken/raadplegen       | ✅ GREEN             | `bdd/@burgerportaal/zoeken.feature` (deterministic; onderwerpen-browse + search-experience; ES search-hits not asserted) |
 
 Also fixed: TS1 `configuratie.feature` was flaking on the 30s default — added `@timeout:120000`.
-Full suite: 37 passed + 3 skipped (the @blocked scenarios), `--workers=1`. tsc + eslint clean.
 Parked scenarios are `@blocked` + `Before(@blocked → test.skip(reason))` so they show as _skipped with reason_, never faked green.
+
+## TS6/TS7 unblocked (2026-07-15)
+
+The blocker was *data*, not code: no account was a member of an authorised
+gebruikersgroep, so `/api/mijn-gebruikersgroepen` was `[]` and the "Nieuwe
+publicatie" form errored. Verified fix, all deterministic:
+
+- **`authProfile` fixture** (`bdd/_core/fixture.ts`) seeds the prerequisite over
+  the **odpc API** (the group *UI* is what TS5 covers): reads the caller's real
+  identity claim from `/api/me` (odpc matches group `GebruikerId` against
+  `preferred_username`, case-insensitive — for the admin that is `admin`), creates
+  an actief organisatie via the `organisations` fixture, resolves its uuid + a
+  first informatiecategorie uuid from `/api/v2/{organisaties,informatiecategorieen}`,
+  then `POST /api/gebruikersgroepen` with `gekoppeldeGebruikers:[id]` +
+  `gekoppeldeWaardelijsten:[orgUuid,catUuid]`. Helpers live in
+  `bdd/@gpp-app/support/usergroup.ts`; cleanup deletes the group by uuid.
+- **`createAndPublishViaUi` / `withdrawViaUi`** (`bdd/@gpp-app/support/publicatie-ui.ts`):
+  Stagehand drives navigation (root → Mijn publicaties → Nieuwe publicatie) and
+  the Publiceren / Ja-publiceren / Publicatie-intrekken buttons; the dependent
+  form (native profiel `<select>`, then titel input + organisatie-radio /
+  informatiecategorie-checkbox option-groups) is filled **deterministically by
+  id/value** — the option-group inputs carry the waardelijst uuid as `value`
+  (carve-out like the onderwerp file input; `act()` was unreliable on the custom
+  widgets). Publishing document-less pops a "Ja, publiceren" confirm.
+- Feature `bdd/@gpp-app/publicaties.feature` is `@gpp-app @admin @anthropic
+  @mode:serial @timeout:240000`. **`@admin` is load-bearing**: it loads adminState
+  into the `page` fixture so the org seed (admin add form) and the
+  `publicationStatusAdmin` read-back both authenticate. Verification is the
+  deterministic admin status read (`gepubliceerd`/`ingetrokken`) — ES/burgerportaal
+  visibility lags indexing and is not asserted. TS7 create-then-withdraw needs the
+  240s budget (two Stagehand passes). **8 passed** across chromium/firefox/webkit.
+
+## TS8 unblocked + GREEN (2026-07-15)
+
+Two stack-level blockers had to fall — neither a test-code issue:
+
+1. **Documenten API not wired.** OpenZaak (`openzaak-web`/`openzaak-celery`) was
+   already in the stack with its API-authorisation applicatie + the ORC service
+   back to the publicatiebank catalogi (`host.docker.internal:8000`), but the
+   **woo-publications side** was missing: the DRC `zgw_consumers.Service` + the
+   `GlobalConfiguration.documents_api_service` + `organisation_rsin`. Provisioned
+   idempotently by **`setup/provision-documenten-api.sh`**. After it, `POST
+   /documenten` registers the document in OpenZaak (verified: create → bestandsdeel
+   upload → gepubliceerd).
+
+2. **User-less-token 500 blocked seeding.** Documents can only be seeded through
+   the woo-publications **token API** (the admin builds the OpenZaak
+   informatieobjecttype URL from the request Host = `localhost`, which OpenZaak
+   cannot match/reach; re-hosting the admin breaks its auth cookies). But that
+   token API 500s whenever an admin session is active — `TokenAuthentication`
+   returned `(None, token)`, and sessionprofile's middleware reads
+   `request.user.is_authenticated` → `AttributeError`. **Fixed in GPP-publicatiebank
+   source** (`api/authorization.py` now returns `AnonymousUser()`; permissions key
+   off `request.auth`, so unaffected). The provision script also live-patches the
+   running image + restarts odrc. This fixes the token API for the whole suite.
+
+Seed (`support/document.ts` `seedPublishedDocument`): token API, `Host:
+host.docker.internal:8000` (so woo-publications emits an ioittype URL OpenZaak
+resolves — set via Playwright's APIRequestContext, since `fetch` cannot set the
+forbidden `Host` header), bestandsdeel upload URLs rewritten to `localhost` for the
+PUT. Mutations via the `docAdmin` Stagehand driver (withdraw = publicatiestatus →
+Ingetrokken; delete via the changelist), verified by reading the changelist status
+back through the session `page`. Feature `@publicatiebank @admin @anthropic
+@mode:serial @timeout:120000`, `--workers=1`.
+
+**Setup for a fresh stack:** run `./setup/provision-documenten-api.sh` once (wires
+the Documenten API + applies the token-auth fix), then the suite.
 
 ---
 

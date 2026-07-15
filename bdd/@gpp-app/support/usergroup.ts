@@ -49,3 +49,78 @@ export async function deleteUsergroupByName(ctx: APIRequestContext, naam: string
 export async function listE2EUsergroupNames(ctx: APIRequestContext, prefix = 'E2E '): Promise<string[]> {
   return (await listUsergroups(ctx)).map(g => g.naam).filter(n => n.startsWith(prefix))
 }
+
+// --- Authorised-group seeding (unblocks the eindgebruiker publicatie flows) ----
+//
+// Creating/editing a publicatie in the gpp-app requires the signed-in user to be
+// a member of a gebruikersgroep that is authorised for at least one organisatie
+// and one informatiecategorie (the "profiel" a publicatie is made under). TS6/TS7
+// need that as a *prerequisite*, so it is seeded deterministically over the odpc
+// JSON API (the group create/edit UI itself is what TS5 tests). odpc matches a
+// group member's `gebruikerId` against the caller's identity claim
+// (preferred_username, case-insensitive — see ODPC.Server MijnGebruikersgroepen),
+// so we read that claim back from `/api/me` rather than guessing it.
+
+function apiUrl(path: string): string {
+  return new URL(path, ENV.apps.gppApp).href
+}
+
+async function firstPage<T>(ctx: APIRequestContext, path: string): Promise<T[]> {
+  const res = await ctx.get(apiUrl(path))
+  if (!res.ok())
+    throw new Error(`GET ${path} -> ${res.status()}: ${(await res.text()).slice(0, 300)}`)
+  const body = await res.json()
+  return Array.isArray(body) ? body : (body.results ?? [])
+}
+
+/** The identity claim odpc matches group membership on (e.g. `admin`). */
+export async function currentUserId(ctx: APIRequestContext): Promise<string> {
+  const res = await ctx.get(apiUrl('/api/me'))
+  if (!res.ok())
+    throw new Error(`GET /api/me -> ${res.status()}`)
+  const me = await res.json()
+  if (!me?.id)
+    throw new Error(`/api/me returned no id: ${JSON.stringify(me).slice(0, 200)}`)
+  return me.id as string
+}
+
+/** UUID of an organisatie by exact naam, from the gpp-app waardelijst. Throws if absent. */
+export async function resolveOrganisatieUuid(ctx: APIRequestContext, naam: string): Promise<string> {
+  const orgs = await firstPage<{ uuid: string, naam: string }>(ctx, '/api/v2/organisaties')
+  const uuid = orgs.find(o => o.naam === naam)?.uuid
+  if (!uuid)
+    throw new Error(`Organisatie "${naam}" not visible in the gpp-app waardelijst (${orgs.length} present)`)
+  return uuid
+}
+
+/** The first available informatiecategorie (uuid + naam) from the gpp-app waardelijst. Throws if none. */
+export async function firstInformatiecategorie(ctx: APIRequestContext): Promise<{ uuid: string, naam: string }> {
+  const cats = await firstPage<{ uuid: string, naam: string }>(ctx, '/api/v2/informatiecategorieen')
+  const cat = cats[0]
+  if (!cat?.uuid)
+    throw new Error('No informatiecategorie available in the gpp-app waardelijst')
+  return { uuid: cat.uuid, naam: cat.naam }
+}
+
+/**
+ * Create a gebruikersgroep with the given member(s) and authorised waardelijst
+ * uuids (organisatie + informatiecategorie) over the odpc API. Returns its uuid.
+ * The caller must have the odpc-admin role (the admin session does).
+ */
+export async function createAuthorisedGroup(
+  ctx: APIRequestContext,
+  opts: { naam: string, gebruikerId: string, waardelijstUuids: string[] },
+): Promise<string> {
+  const res = await ctx.post(apiUrl('/api/gebruikersgroepen'), {
+    data: {
+      naam: opts.naam,
+      omschrijving: 'E2E authorised profiel (prerequisite for publicatie flows)',
+      gekoppeldeWaardelijsten: opts.waardelijstUuids,
+      gekoppeldeGebruikers: [opts.gebruikerId],
+    },
+  })
+  if (!res.ok())
+    throw new Error(`POST gebruikersgroepen -> ${res.status()}: ${(await res.text()).slice(0, 300)}`)
+  const body = await res.json()
+  return body.uuid as string
+}

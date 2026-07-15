@@ -1,31 +1,29 @@
 # Testscripts 6 & 7 — Creëren / wijzigen / intrekken van een publicatie (eindgebruiker).
 #
-# PARKED / BLOCKED — not runnable as the test stack is provisioned. Creating or
-# editing a publicatie in the GPP-app requires the signed-in user to be a member
-# of a gebruikersgroep that is authorised for at least one organisatie and
-# informatiecategorie (the "profiel" a publicatie is made under). On this stack
-# `/api/mijn-gebruikersgroepen` returns `[]` for every available account (incl.
-# the admin), so "Nieuwe publicatie" shows "Er is iets misgegaan bij het ophalen
-# van de gegevens" and renders no form — there is nothing to drive. (All backing
-# API calls return 200; the blocker is missing authorised-group membership, not a
-# server error.) Documents would be blocked regardless (no Documents API — see
-# PLAN-plateau4-remaining.md).
-#
-# To unblock: give a test account membership of a gebruikersgroep authorised for
-# an organisatie + informatiecategorie (extend TS5: create group → "Gebruiker
-# toevoegen" → authorise org/categorie). Then implement create/edit/withdraw via
-# Stagehand (the SPA hydrates only via click-navigation from the app root — see
-# gebruikersgroepen-steps.ts) with "Publicatie zonder documenten" for publishing,
-# verifying + cleaning up through the publicatiebank admin (publication.ts).
-@blocked @gpp-app
-Feature: Publicaties creëren en wijzigen in de GPP-app (geblokkeerd)
+# An eindgebruiker creates and withdraws a publicatie in the GPP-app. Creating one
+# requires the signed-in user to be a member of a gebruikersgroep authorised for an
+# organisatie + informatiecategorie (the "profiel"); the `authProfile` fixture
+# seeds that prerequisite over the odpc API (the group *UI* is what TS5 covers).
+# Stagehand `act()` drives the SPA — root → Mijn publicaties → Nieuwe publicatie —
+# and publishes "zonder documenten" (this stack has no Documents API; documents are
+# TS8). The result is verified *deterministically* by reading the publicatiestatus
+# back through the publicatiebank Django admin (session-authenticated, stable): a
+# `gepubliceerd` publicatie is what makes it public, and burgerportaal/ES visibility
+# lags indexing so it is not asserted here (see README "Known server flake").
+# `@admin` loads the admin storage state (adminState) into the ordinary `page`
+# fixture: the authorised-group + organisatie seeding and the publicatiestatus
+# read-back both go through the session-authenticated publicatiebank admin.
+# The withdraw scenario seeds its publicatie through the same (slow) Stagehand
+# publish flow before withdrawing, so the whole feature runs on a 240s budget.
+@gpp-app @admin @anthropic @mode:serial @timeout:240000
+Feature: Publicaties creëren en intrekken in de GPP-app
 
-  Scenario: Create a publicatie (blocked: no authorised gebruikersgroep membership)
+  Scenario: Create a publicatie
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I create and publish a publicatie through the gpp-app
     Then the publicatie is public on the burgerportaal
 
-  Scenario: Withdraw a publicatie (blocked: no authorised gebruikersgroep membership)
+  Scenario: Withdraw a publicatie
     Given a published publicatie owned by the signed-in user
     When I withdraw the publicatie through the gpp-app
     Then the publicatie is no longer public

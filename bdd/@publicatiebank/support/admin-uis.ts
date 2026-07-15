@@ -27,3 +27,9 @@ export const PUBLICATION_ADMIN: AdminDriverConfig = {
   changelist: `${pub}/admin/publications/publication/`,
   rowLink: 'titel link',
 }
+
+export const DOCUMENT_ADMIN: AdminDriverConfig = {
+  noun: 'document',
+  changelist: `${pub}/admin/publications/document/`,
+  rowLink: 'officiële titel link',
+}

@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { deleteUsergroupByName, listE2EUsergroupNames } from '@/bdd/@gpp-app/support/usergroup'
+import { deleteDocumentByTitel, listE2EDocumentTitels } from '@/bdd/@publicatiebank/support/document'
 import { deleteCategoryByName, listE2ECategoryNames } from '@/bdd/@publicatiebank/support/information-category'
 import { deleteOrganisationByName, listE2EOrganisationNames } from '@/bdd/@publicatiebank/support/organisation'
 import { deletePublicationByTitel, listE2EPublicationTitels } from '@/bdd/@publicatiebank/support/publication'
@@ -21,6 +22,8 @@ const ADMIN_SWEEPS: AdminSweep[] = [
   { label: 'categories', list: listE2ECategoryNames, remove: deleteCategoryByName },
   { label: 'organisaties', list: listE2EOrganisationNames, remove: deleteOrganisationByName },
   { label: 'onderwerpen', list: listE2ETopicNames, remove: deleteTopicByName },
+  // Documents before publicaties: a document belongs to a publicatie.
+  { label: 'documenten', list: listE2EDocumentTitels, remove: deleteDocumentByTitel },
   { label: 'publicaties', list: listE2EPublicationTitels, remove: deletePublicationByTitel },
 ]
 

@@ -3,9 +3,10 @@ import type { AdminDriver } from '@/bdd/@publicatiebank/support/admin-driver'
 import type { Stagehand } from '@browserbasehq/stagehand'
 import type { AppName, User } from './types'
 import { BeheerConfigClient } from '@/bdd/@burgerportaal/support/beheer-config'
-import { deleteUsergroupByName, usergroupExists } from '@/bdd/@gpp-app/support/usergroup'
+import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, firstInformatiecategorie, resolveOrganisatieUuid, usergroupExists } from '@/bdd/@gpp-app/support/usergroup'
 import { adminDriver } from '@/bdd/@publicatiebank/support/admin-driver'
-import { ORGANISATION_ADMIN, PUBLICATION_ADMIN, TOPIC_ADMIN } from '@/bdd/@publicatiebank/support/admin-uis'
+import { DOCUMENT_ADMIN, ORGANISATION_ADMIN, PUBLICATION_ADMIN, TOPIC_ADMIN } from '@/bdd/@publicatiebank/support/admin-uis'
+import { deleteDocumentByTitel } from '@/bdd/@publicatiebank/support/document'
 import { addSelfAddedCategory, deleteCategoryByName } from '@/bdd/@publicatiebank/support/information-category'
 import { OdrcClient } from '@/bdd/@publicatiebank/support/odrc'
 import { addSelfAddedOrganisation, deleteOrganisationByName } from '@/bdd/@publicatiebank/support/organisation'
@@ -110,6 +111,33 @@ export interface UsergroupManager {
   last: () => string
 }
 
+/**
+ * Owns the documents a scenario seeds (through the token API) for the document
+ * beheer scenarios (TS8). Only tracks + cleans up (via the admin) — creation is
+ * bespoke (needs a publisher org + file upload), so it is done in the step with
+ * {@link seedPublishedDocument}. Mirrors {@link PublicationManager}.
+ */
+export interface DocumentManager {
+  /** Register an officiële titel seeded through the token API so cleanup deletes it. */
+  track: (titel: string) => string
+  /** A fresh unique `E2E …` titel, without creating anything. */
+  freshName: () => string
+  /** Officiële titel of the most recently tracked document (throws if none). */
+  last: () => string
+}
+
+/** Seeds an authorised profiel (gebruikersgroep) for the eindgebruiker publicatie flows. */
+export interface AuthProfileSeeder {
+  /**
+   * Create an authorised gebruikersgroep the signed-in admin belongs to (member +
+   * one organisatie + one informatiecategorie). Returns the group uuid (the
+   * "Profiel" <option> value) plus the organisatie + informatiecategorie uuids —
+   * the publicatie form's inputs all carry those uuids as their `value`, so the
+   * create flow selects them deterministically.
+   */
+  seed: () => Promise<{ profielUuid: string, organisatieUuid: string, informatiecategorieUuid: string }>
+}
+
 /** One GET against the burgerportaal (status + content type + raw body). */
 export interface SitemapResponse {
   path: string
@@ -154,8 +182,20 @@ interface BddFixtures {
   odrc: OdrcClient
   /** Test-owned publicaties (seeded + cleaned up via the admin). */
   publications: PublicationManager
+  /** Test-owned documents (seeded via the token API, cleaned up via the admin). */
+  documents: DocumentManager
   /** Test-owned gpp-app gebruikersgroepen (verified + cleaned up via the odpc API). */
   usergroups: UsergroupManager
+  /**
+   * Seeds an authorised gebruikersgroep ("profiel") that the signed-in admin is a
+   * member of, authorised for one organisatie + one informatiecategorie. This is
+   * the prerequisite that lets the gpp-app "Nieuwe publicatie" form render (TS6/7):
+   * without an authorised group `/api/mijn-gebruikersgroepen` is empty and the
+   * form errors. Seeded over the odpc API (the group *UI* is what TS5 tests);
+   * cleaned up in teardown. The org it creates is owned by the `organisations`
+   * fixture. Returns the group naam to select as the profiel.
+   */
+  authProfile: AuthProfileSeeder
   /** Anonymous HTTP client for the public burgerportaal sitemap. */
   sitemap: SitemapClient
   /**
@@ -180,6 +220,8 @@ interface BddFixtures {
   topicAdmin: AdminDriver
   /** Django-admin CRUD driver for publicaties, bound to `adminStagehand`. */
   pubAdmin: AdminDriver
+  /** Django-admin CRUD driver for documenten, bound to `adminStagehand`. */
+  docAdmin: AdminDriver
   /**
    * Authenticated burgerportaal beheer config client. Snapshots the config on
    * setup and restores it in teardown, so a scenario owns (and cleans up) every
@@ -275,6 +317,18 @@ export const test = base.extend<BddFixtures>({
     await use(manager)
     await teardown()
   },
+  documents: async ({ page }, use, testInfo) => {
+    // Seeded through the token API (see seedPublishedDocument); tracked here and
+    // deleted through the admin in teardown (session auth), like publicaties.
+    const { manager, teardown } = makeResourceManager({
+      workerIndex: testInfo.workerIndex,
+      prefix: 'E2E doc ',
+      emptyMessage: 'No document seeded/tracked in this scenario',
+      remove: name => deleteDocumentByTitel(page, name),
+    })
+    await use(manager)
+    await teardown()
+  },
   // eslint-disable-next-line no-empty-pattern
   usergroups: async ({}, use, testInfo) => {
     // Session-authenticated odpc API client (gpp-app cookies live in adminState).
@@ -293,6 +347,33 @@ export const test = base.extend<BddFixtures>({
     }
     finally {
       await teardown()
+      await ctx.dispose()
+    }
+  },
+  authProfile: async ({ organisations }, use, testInfo) => {
+    // Session-authenticated odpc API context (gpp-app cookies live in adminState).
+    const ctx = await apiRequest.newContext({ storageState: adminState })
+    const createdUuids: string[] = []
+    try {
+      await use({
+        async seed() {
+          // Match membership on the caller's real identity claim, read from odpc.
+          const gebruikerId = await currentUserId(ctx)
+          // Owned + cleaned up by the organisations fixture; must be actief to appear.
+          const orgNaam = await organisations.add()
+          const orgUuid = await resolveOrganisatieUuid(ctx, orgNaam)
+          const cat = await firstInformatiecategorie(ctx)
+          const naam = `E2E profiel ${testInfo.workerIndex}-${createdUuids.length}-${Date.now()}`
+          const uuid = await createAuthorisedGroup(ctx, { naam, gebruikerId, waardelijstUuids: [orgUuid, cat.uuid] })
+          createdUuids.push(uuid)
+          return { profielUuid: uuid, organisatieUuid: orgUuid, informatiecategorieUuid: cat.uuid }
+        },
+      })
+    }
+    finally {
+      // Own-and-cleanup; the run-wide `E2E ` sweep in global-teardown backs this up.
+      for (const uuid of [...createdUuids].reverse())
+        await ctx.delete(new URL(`/api/gebruikersgroepen/${uuid}`, ENV.apps.gppApp).href).catch(() => {})
       await ctx.dispose()
     }
   },
@@ -344,6 +425,9 @@ export const test = base.extend<BddFixtures>({
   },
   pubAdmin: async ({ adminStagehand }, use) => {
     await use(adminDriver(adminStagehand, PUBLICATION_ADMIN))
+  },
+  docAdmin: async ({ adminStagehand }, use) => {
+    await use(adminDriver(adminStagehand, DOCUMENT_ADMIN))
   },
   // Depends on no other fixtures; builds its own authenticated API context.
   // eslint-disable-next-line no-empty-pattern
