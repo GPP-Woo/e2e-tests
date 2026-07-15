@@ -29,69 +29,132 @@ function stripCodeFence(text: string): string {
 }
 
 /**
- * Stagehand's act()/extract() ask the model for strict JSON and then
- * `JSON.parse` the message content. Some models reachable through OpenRouter
- * (notably Anthropic Claude) ignore `response_format: json_object` and wrap
- * their JSON in a ```json code fence, which breaks the parse. This fetch
- * wrapper post-processes chat-completion responses and unwraps any such fence,
- * so every model — cheap or expensive, OpenAI/Google/Anthropic — yields
- * parseable JSON. It is a no-op for models that already answer cleanly.
+ * Build the fetch OpenRouter is called through. It does two jobs:
+ *
+ * 1. REQUEST rewrite — Stagehand's `CustomOpenAIClient` was constructed with a
+ *    single fixed model, but we route each operation (plan/act/verify) to its
+ *    own model. `modelFor()` returns the model for whichever role is active
+ *    right now (set by the method wrappers in {@link createStagehand}), and we
+ *    overwrite the outgoing request's `model` field with it.
+ * 2. RESPONSE unwrap — Stagehand's act()/extract() ask the model for strict
+ *    JSON and then `JSON.parse` the message content. Some models reachable
+ *    through OpenRouter (notably Anthropic Claude) ignore
+ *    `response_format: json_object` and wrap their JSON in a ```json code
+ *    fence, which breaks the parse. We strip any such fence so every model —
+ *    cheap or expensive, OpenAI/Google/Anthropic — yields parseable JSON. It
+ *    is a no-op for models that already answer cleanly.
  */
-async function openRouterFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init)
-  if (!(response.headers.get('content-type') ?? '').includes('application/json'))
-    return response
-
-  const text = await response.text()
-  let body = text
-  try {
-    const json = JSON.parse(text)
-    let changed = false
-    for (const choice of json.choices ?? []) {
-      const content = choice?.message?.content
-      if (typeof content === 'string') {
-        const stripped = stripCodeFence(content)
-        if (stripped !== content) {
-          choice.message.content = stripped
-          changed = true
+export function makeOpenRouterFetch(modelFor: () => string) {
+  return async function openRouterFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    // (1) Rewrite the request's model to the active role's model. Chat requests
+    // arrive as a JSON string body carrying a `model` field; leave anything else
+    // untouched (it then falls back to the client's constructor model).
+    if (init && typeof init.body === 'string') {
+      try {
+        const reqJson = JSON.parse(init.body)
+        if (reqJson && typeof reqJson === 'object' && 'model' in reqJson) {
+          reqJson.model = modelFor()
+          const headers = new Headers(init.headers)
+          headers.delete('content-length') // body length changes; let fetch recompute
+          init = { ...init, body: JSON.stringify(reqJson), headers }
         }
       }
+      catch {
+        // Non-JSON body — pass through unchanged.
+      }
     }
-    if (changed)
-      body = JSON.stringify(json)
-  }
-  catch {
-    // Not JSON we can post-process (e.g. a streamed/error body) — pass through.
-  }
 
-  // Rebuild without the original Content-Length (the body may have shrunk).
-  const headers = new Headers(response.headers)
-  headers.delete('content-length')
-  return new Response(body, { status: response.status, statusText: response.statusText, headers })
+    const response = await fetch(input, init)
+    if (!(response.headers.get('content-type') ?? '').includes('application/json'))
+      return response
+
+    const text = await response.text()
+    let body = text
+    try {
+      const json = JSON.parse(text)
+      let changed = false
+      for (const choice of json.choices ?? []) {
+        const content = choice?.message?.content
+        if (typeof content === 'string') {
+          const stripped = stripCodeFence(content)
+          if (stripped !== content) {
+            choice.message.content = stripped
+            changed = true
+          }
+        }
+      }
+      if (changed)
+        body = JSON.stringify(json)
+    }
+    catch {
+      // Not JSON we can post-process (e.g. a streamed/error body) — pass through.
+    }
+
+    // Rebuild without the original Content-Length (the body may have shrunk).
+    const headers = new Headers(response.headers)
+    headers.delete('content-length')
+    return new Response(body, { status: response.status, statusText: response.statusText, headers })
+  }
 }
-
-/** Default model when a scenario carries no model tag — good-enough + cheap. */
-export const DEFAULT_MODEL = 'google/gemini-2.5-flash'
 
 /**
- * Scenario tag -> OpenRouter model id. A scenario opts into a stronger (or
- * cheaper) model by adding one of these tags; the first match wins, otherwise
- * {@link DEFAULT_MODEL} is used. Add rows here to expose more models.
+ * The three roles a browser-automation run splits into, mapped onto Stagehand's
+ * primitives:
+ *
+ *   planner       -> observe()  — "what can I do on this page?" (0 uses today)
+ *   worker        -> act()      — click/fill/select a single instruction (~all traffic)
+ *   verification  -> extract()  — read page state back to assert against
+ *
+ * Each role picks a model per {@link Tier}. Worker is where ~98% of the tokens
+ * (and cost) go, so its cheap/default tiers use the small Gemini models; only
+ * genuinely flaky or critical scenarios pay for `expensive`. Planner is unused
+ * until this suite adopts `stagehand.agent()`/`observe()`; its row is kept so
+ * that routing is ready the day it is.
+ *
+ * See README "AI model routing" for which tag to reach for.
  */
-export const MODEL_BY_TAG: Record<string, string> = {
-  '@expensive-ai': 'anthropic/claude-opus-4.1',
-  '@anthropic': 'anthropic/claude-sonnet-4.5',
-  '@openai': 'openai/gpt-4.1',
-  '@cheap-ai': 'google/gemini-2.5-flash-lite',
+export type Role = 'planner' | 'worker' | 'verification'
+export type Tier = 'cheap' | 'default' | 'expensive'
+
+export const ROLE_MODELS: Record<Role, Record<Tier, string>> = {
+  planner: {
+    cheap: 'deepseek/deepseek-chat',
+    default: 'deepseek/deepseek-chat',
+    expensive: 'anthropic/claude-sonnet-4.5',
+  },
+  worker: {
+    cheap: 'google/gemini-2.5-flash-lite',
+    default: 'openai/gpt-4o-mini',
+    expensive: 'anthropic/claude-sonnet-4.5',
+  },
+  verification: {
+    cheap: 'google/gemini-2.5-flash-lite',
+    default: 'openai/gpt-4o-mini',
+    expensive: 'anthropic/claude-sonnet-4.5',
+  },
 }
 
-/** Resolve the OpenRouter model id for a scenario's tags. */
-export function modelForTags(tags: string[]): string {
-  for (const tag of Object.keys(MODEL_BY_TAG)) {
-    if (tags.includes(tag))
-      return MODEL_BY_TAG[tag]
-  }
-  return DEFAULT_MODEL
+/** Tier for a scenario's tags: `@expensive-ai` > `@cheap-ai` > default. */
+export function tierForTags(tags: string[]): Tier {
+  if (tags.includes('@expensive-ai'))
+    return 'expensive'
+  if (tags.includes('@cheap-ai'))
+    return 'cheap'
+  return 'default'
+}
+
+/** Prefix of the per-scenario model-override tag, e.g. `@model:openai/gpt-4.1`. */
+const MODEL_TAG_PREFIX = '@model:'
+
+/**
+ * Explicit model a scenario pins itself to via a `@model:<openrouter-id>` tag
+ * (e.g. `@model:openai/gpt-4.1`), or undefined. This overrides tier + role
+ * routing for every operation in the scenario. For a single step instead of a
+ * whole scenario, use `stagehand.withModel()`.
+ */
+export function overrideModelForTags(tags: string[]): string | undefined {
+  const tag = tags.find(t => t.startsWith(MODEL_TAG_PREFIX))
+  return tag ? tag.slice(MODEL_TAG_PREFIX.length) || undefined : undefined
 }
 
 /** True when an OpenRouter key is configured (else @beheer scenarios skip). */
@@ -103,14 +166,42 @@ export function hasOpenRouterKey(): boolean {
 const KEYCLOAK_HOST_MAP = '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1'
 
 export interface StagehandOptions {
-  /** OpenRouter model id — usually `modelForTags($tags)`. */
-  model: string
+  /** Cost tier — usually `tierForTags($tags)`. Ignored when `overrideModel` is set. */
+  tier: Tier
+  /** Whole-scenario model override — usually `overrideModelForTags($tags)`. */
+  overrideModel?: string
   /** Storage-state file whose cookies get injected to restore an auth session. */
   storageStatePath?: string
 }
 
 /**
- * Build and initialise a LOCAL Stagehand driven by an OpenRouter model.
+ * `withModel` is attached to every Stagehand instance by {@link createStagehand}.
+ * Augment Stagehand's own type (rather than a subtype) so `stagehand.withModel`
+ * is visible everywhere without a wrapper interface — a subtype would re-trigger
+ * TS's "excessively deep" guard on Stagehand's heavily-overloaded `extract()`.
+ *
+ *   await stagehand.withModel('anthropic/claude-sonnet-4.5', () =>
+ *     stagehand.act('the one flaky action'))
+ */
+declare module '@browserbasehq/stagehand' {
+  interface Stagehand {
+    withModel: <T>(model: string, fn: () => T | Promise<T>) => Promise<T>
+  }
+}
+
+/**
+ * Build and initialise a LOCAL Stagehand that routes each operation to its
+ * role's model (see {@link ROLE_MODELS}).
+ *
+ * Model resolution per request, highest precedence first:
+ *   1. `withModel()` step override   — `active.override`
+ *   2. `@model:<id>` scenario tag     — `opts.overrideModel` (seeds `active.override`)
+ *   3. role × tier default            — `ROLE_MODELS[role][tier]`
+ *
+ * Stagehand takes a single `llmClient`, so we make the model per-request rather
+ * than per-client: a mutable `active.role` is flipped by thin wrappers around
+ * `act`/`extract`/`observe`, and {@link makeOpenRouterFetch} rewrites each
+ * outgoing request's `model` to `modelFor(active.role)`.
  *
  * Stagehand launches its own Chromium (separate from Playwright's `page`
  * fixture), so we (a) add the same Keycloak host-resolver arg the main config
@@ -123,9 +214,19 @@ export async function createStagehand(opts: StagehandOptions): Promise<Stagehand
   if (!apiKey)
     throw new Error('OPENROUTER_API_KEY is not set (required for the @beheer Stagehand scenarios)')
 
+  // Role starts at `worker`: act() is ~all traffic, and any LLM call Stagehand
+  // makes outside a wrapped method (init, self-heal) is worker-ish anyway.
+  // `override` is seeded by the scenario's `@model:` tag and swapped by withModel().
+  const active: { role: Role, override?: string } = { role: 'worker', override: opts.overrideModel }
+  const modelFor = (role: Role) => active.override ?? ROLE_MODELS[role][opts.tier]
+
   const llmClient = new CustomOpenAIClient({
-    modelName: opts.model,
-    client: new OpenAI({ apiKey, baseURL: OPENROUTER_BASE_URL, fetch: openRouterFetch }),
+    modelName: modelFor('worker'), // fallback only; the fetch rewrites per role
+    client: new OpenAI({
+      apiKey,
+      baseURL: OPENROUTER_BASE_URL,
+      fetch: makeOpenRouterFetch(() => modelFor(active.role)),
+    }),
   })
 
   const stagehand = new Stagehand({
@@ -138,6 +239,30 @@ export async function createStagehand(opts: StagehandOptions): Promise<Stagehand
     },
   })
   await stagehand.init()
+
+  // Route each primitive to its role by flipping `active.role` before delegating.
+  // Instance properties shadow the prototype methods, so every `stagehand.act(…)`
+  // call site (including captured references) picks this up.
+  const withRole = <A extends unknown[], R>(role: Role, fn: (...a: A) => R) => (...a: A): R => {
+    active.role = role
+    return fn(...a)
+  }
+  const sh = stagehand as unknown as Record<string, unknown>
+  sh.act = withRole('worker', stagehand.act.bind(stagehand))
+  sh.extract = withRole('verification', stagehand.extract.bind(stagehand))
+  sh.observe = withRole('planner', stagehand.observe.bind(stagehand))
+
+  // Step-level override: force `model` for the calls inside `fn`, then restore.
+  sh.withModel = async <T>(model: string, fn: () => T | Promise<T>): Promise<T> => {
+    const prev = active.override
+    active.override = model
+    try {
+      return await fn()
+    }
+    finally {
+      active.override = prev
+    }
+  }
 
   if (opts.storageStatePath && fs.existsSync(opts.storageStatePath)) {
     const state = JSON.parse(fs.readFileSync(opts.storageStatePath, 'utf-8'))

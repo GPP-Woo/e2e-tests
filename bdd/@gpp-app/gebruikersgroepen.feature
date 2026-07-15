@@ -12,7 +12,7 @@
 # fetches through the same service token that intermittently 500s under load
 # (see README "Known server flake") and are not exposed on the group list API, so
 # they are not asserted here.
-@gpp-app @anthropic @mode:serial @timeout:120000
+@gpp-app @ai @mode:serial @timeout:120000
 Feature: Gebruikersgroepen beheren in de GPP-app
   As functioneel beheer
   I want to create, rename and delete gebruikersgroepen

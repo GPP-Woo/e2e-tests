@@ -19,10 +19,11 @@ import { Before, Given, test, Then, When } from '../../_core/fixture'
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
 
-// Skip the feature when no model key is configured (like @beheer), so the rest
-// of the suite stays green without OpenRouter.
-Before({ tags: '@anthropic' }, async () => {
-  test.skip(!hasOpenRouterKey(), 'Set OPENROUTER_API_KEY to run the Stagehand @admin scenarios')
+// Skip AI-driven scenarios when no model key is configured, so the rest of the
+// suite stays green without OpenRouter. `@ai` marks every Stagehand scenario
+// across the admin + gpp-app verticals (@beheer has its own guard).
+Before({ tags: '@ai' }, async () => {
+  test.skip(!hasOpenRouterKey(), 'Set OPENROUTER_API_KEY to run the Stagehand @ai scenarios')
 })
 
 Given('the publicatiebank organisatie admin is open', async ({ orgAdmin }) => {

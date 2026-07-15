@@ -13,7 +13,7 @@ import { addSelfAddedOrganisation, deleteOrganisationByName } from '@/bdd/@publi
 import { addConceptPublication, deletePublicationByTitel } from '@/bdd/@publicatiebank/support/publication'
 import { addTopic, deleteTopicByName } from '@/bdd/@publicatiebank/support/topic'
 import { signIn as performSignIn } from '@/bdd/_core/signIn'
-import { createStagehand, modelForTags } from '@/bdd/_core/stagehand'
+import { createStagehand, overrideModelForTags, tierForTags } from '@/bdd/_core/stagehand'
 import { adminState, burgerportaalAdminState, regularState } from '@/setup/paths'
 import { request as apiRequest } from '@playwright/test'
 import { test as base, createBdd } from 'playwright-bdd'
@@ -400,7 +400,8 @@ export const test = base.extend<BddFixtures>({
   },
   stagehand: async ({ $tags }, use) => {
     const stagehand = await createStagehand({
-      model: modelForTags($tags),
+      tier: tierForTags($tags),
+      overrideModel: overrideModelForTags($tags),
       storageStatePath: burgerportaalAdminState,
     })
     await use(stagehand)
@@ -408,7 +409,8 @@ export const test = base.extend<BddFixtures>({
   },
   adminStagehand: async ({ $tags }, use) => {
     const stagehand = await createStagehand({
-      model: modelForTags($tags),
+      tier: tierForTags($tags),
+      overrideModel: overrideModelForTags($tags),
       storageStatePath: adminState,
     })
     await use(stagehand)

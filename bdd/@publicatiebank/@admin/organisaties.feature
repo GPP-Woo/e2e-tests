@@ -17,8 +17,10 @@
 #
 # Requires OPENROUTER_API_KEY (else every scenario skips) — see README.
 #
-# @anthropic — Claude Sonnet drives the admin DOM reliably; override per scenario
-# with @cheap-ai / @openai / @expensive-ai, or drop the tag for the default model.
+# @ai — marks this as a Stagehand scenario (skipped without OPENROUTER_API_KEY).
+# Runs on the cheap default (Gemini Flash). If the admin DOM acts prove flaky,
+# add @expensive-ai (Claude Sonnet) or pin one model with @model:<openrouter-id>.
+# See the README "AI model routing" table.
 #
 # @mode:serial — like the @beheer feature, the AI DOM operations are more
 # reliable one-at-a-time, and it keeps concurrent load off the publicatiebank
@@ -26,7 +28,7 @@
 
 # @timeout — each scenario drives several Stagehand act() calls (each an LLM
 # round-trip) plus API polling, which comfortably exceeds the 30s default.
-@anthropic @mode:serial @timeout:120000
+@ai @mode:serial @timeout:120000
 Feature: Configureren van organisaties
   As a functioneel-beheerder of the GPP-publicatiebank
   I want to activate, add, edit and delete organisaties

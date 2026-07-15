@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { hasOpenRouterKey, settle, stagehandPage } from '@/bdd/_core/stagehand'
 import { expect } from '@playwright/test'
+import { z } from 'zod'
 import { Before, Given, test, Then, When } from '../../_core/fixture'
 import { ENV } from '../../_core/types'
 
@@ -84,8 +85,8 @@ Then('the public homepage shows the new welcome text', async ({ stagehand, behee
   const page = stagehandPage(stagehand)
   await page.goto(`${base}/`)
   await settle(page)
-  const extracted = (await stagehand.extract('Extract the welcome text shown on the homepage')) as { extraction?: string }
-  expect(extracted.extraction ?? '').toContain(token)
+  const extracted = await stagehand.extract('Extract the welcome text shown on the homepage', z.string())
+  expect(extracted ?? '').toContain(token)
 })
 
 // --- Promotievideo ---------------------------------------------------------

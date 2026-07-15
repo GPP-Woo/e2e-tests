@@ -11,7 +11,7 @@ import { Given, Then, When } from '../_core/fixture'
  * and cleanup use the odpc JSON API through the `usergroups` fixture — the token
  * API on the publicatiebank is not involved here.
  *
- * The `@anthropic` skip guard (no OpenRouter key → skip) is shared with the other
+ * The `@ai` skip guard (no OpenRouter key → skip) is shared with the other
  * Stagehand features (see @publicatiebank/@admin/steps.ts).
  */
 

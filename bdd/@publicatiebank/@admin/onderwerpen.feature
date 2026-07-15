@@ -23,7 +23,7 @@
 
 # @timeout — Stagehand act() calls (each an LLM round-trip) plus API polling
 # comfortably exceed the 30s default.
-@anthropic @mode:serial @timeout:120000
+@ai @mode:serial @timeout:120000
 Feature: Configureren van onderwerpen
   As a functioneel-beheerder of the GPP-publicatiebank
   I want to add, promote, edit and delete onderwerpen

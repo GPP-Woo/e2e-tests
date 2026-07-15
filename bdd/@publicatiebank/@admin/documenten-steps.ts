@@ -10,7 +10,7 @@ import { Given, Then, When } from '../../_core/fixture'
  * session-authenticated `page` (stable, unlike the token API while Stagehand
  * drives the same server — see README "Known server flake").
  *
- * The `@anthropic` skip guard (no OpenRouter key → skip) and the `adminStagehand`
+ * The `@ai` skip guard (no OpenRouter key → skip) and the `adminStagehand`
  * fixture are shared with the organisatie/onderwerp/publicatie steps (see steps.ts).
  */
 

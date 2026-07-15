@@ -11,5 +11,10 @@
     "bdd",
     "setup",
     "playwright.config.ts"
+  ],
+  // *.check.ts are standalone `node --experimental-strip-types` scripts (they use
+  // .ts import specifiers + top-level await that the app tsconfig disallows).
+  "exclude": [
+    "**/*.check.ts"
   ]
 }

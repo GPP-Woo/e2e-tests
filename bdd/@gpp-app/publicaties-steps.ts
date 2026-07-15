@@ -13,7 +13,7 @@ import { createAndPublishViaUi, withdrawViaUi } from './support/publicatie-ui'
  * (session-authenticated `page`), because the token API is unreliable while
  * Stagehand drives the same server (see README "Known server flake").
  *
- * The `@anthropic` skip guard (no OpenRouter key → skip) is shared with the other
+ * The `@ai` skip guard (no OpenRouter key → skip) is shared with the other
  * Stagehand features (see @publicatiebank/@admin/steps.ts).
  */
 

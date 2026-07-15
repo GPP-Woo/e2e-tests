@@ -11,7 +11,7 @@
 # Runs with `--workers=1`: the token-API seed 500s while any admin session drives
 # the same odrc server (the user-less-token flake — see support/odrc.ts), so no
 # other feature may drive the admin concurrently.
-@publicatiebank @admin @anthropic @mode:serial @timeout:120000
+@publicatiebank @admin @ai @mode:serial @timeout:120000
 Feature: Document beheer in de GPP-publicatiebank
 
   Scenario: Withdraw a document

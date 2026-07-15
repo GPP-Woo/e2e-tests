@@ -13,7 +13,7 @@ import { Given, Then, When } from '../../_core/fixture'
  * unreliable while Stagehand drives the same server (see README "Known server
  * flake").
  *
- * The `@anthropic`-tagged skip guard and the `adminStagehand` fixture are shared
+ * The `@ai`-tagged skip guard and the `adminStagehand` fixture are shared
  * with the organisatie steps (see steps.ts).
  */
 

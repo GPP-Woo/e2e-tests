@@ -11,10 +11,10 @@
 # restored afterwards (bdd/_core/fixture.ts `beheer` fixture), so runs — including
 # against shared/production environments — leave the portal exactly as found.
 #
-# Model-by-tag: this feature carries @anthropic (Claude Sonnet, reliable for
-# DOM acts); a scenario can override with @expensive-ai / @cheap-ai / @openai,
-# and anything untagged falls back to the default model. See
-# _core/stagehand.ts.
+# Model routing: this feature runs on the cheap default (Gemini Flash). If DOM
+# acts prove flaky, add @expensive-ai (Claude Sonnet) or pin a specific model
+# with a @model:<openrouter-id> tag (e.g. @model:openai/gpt-4.1). See
+# _core/stagehand.ts and the README "AI model routing" table.
 #
 # Requires OPENROUTER_API_KEY (else every scenario skips) — see README.
 #
@@ -27,7 +27,7 @@
 # round-trips per act) and then publishes, which comfortably exceeds Playwright's
 # 30s default; the other Stagehand features carry the same override.
 
-@anthropic @mode:serial @timeout:120000
+@mode:serial @timeout:120000
 Feature: Configureren van het burgerportaal
 
   Background:

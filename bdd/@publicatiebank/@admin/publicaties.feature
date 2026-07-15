@@ -9,7 +9,7 @@
 # Documents are out of scope: this stack has no Documents API configured (see
 # PLAN-plateau4-remaining.md), so TS9's document sub-steps and all of TS8 are
 # parked.
-@anthropic @mode:serial @timeout:120000
+@ai @mode:serial @timeout:120000
 Feature: Publicatie beheer in de GPP-publicatiebank
   As functioneel beheer
   I want to correct, publish and withdraw publicaties in the publicatiebank
