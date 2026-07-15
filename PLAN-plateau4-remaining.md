@@ -2,26 +2,26 @@
 
 ## FINAL STATUS (2026-07-14)
 
-| TS                           | Status               | Where                                                                                                                    |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| TS5 gebruikersgroepen        | ✅ GREEN             | `bdd/@gpp-app/gebruikersgroepen.feature` (Stagehand mutate, odpc-API verify/clean)                                       |
-| TS6 publicatie creëren       | ✅ GREEN             | `bdd/@gpp-app/publicaties.feature` — unblocked (see below)                                                               |
-| TS7 publicatie intrekken     | ✅ GREEN             | same file — create-then-withdraw via the gpp-app SPA                                                                     |
-| TS8 document beheer          | ✅ GREEN             | `bdd/@publicatiebank/@admin/documenten.feature` — unblocked via provisioning + a token-auth fix (see TS8 note)           |
-| TS9 publicatie beheer        | ✅ GREEN             | `bdd/@publicatiebank/@admin/publicaties.feature` (Stagehand mutate via admin, admin-read verify)                         |
-| TS11 zoeken/raadplegen       | ✅ GREEN             | `bdd/@burgerportaal/zoeken.feature` (deterministic; onderwerpen-browse + search-experience; ES search-hits not asserted) |
+| TS                       | Status   | Where                                                                                                                    |
+| ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| TS5 gebruikersgroepen    | ✅ GREEN | `bdd/@gpp-app/gebruikersgroepen.feature` (Stagehand mutate, odpc-API verify/clean)                                       |
+| TS6 publicatie creëren   | ✅ GREEN | `bdd/@gpp-app/publicaties.feature` — unblocked (see below)                                                               |
+| TS7 publicatie intrekken | ✅ GREEN | same file — create-then-withdraw via the gpp-app SPA                                                                     |
+| TS8 document beheer      | ✅ GREEN | `bdd/@publicatiebank/@admin/documenten.feature` — unblocked via provisioning + a token-auth fix (see TS8 note)           |
+| TS9 publicatie beheer    | ✅ GREEN | `bdd/@publicatiebank/@admin/publicaties.feature` (Stagehand mutate via admin, admin-read verify)                         |
+| TS11 zoeken/raadplegen   | ✅ GREEN | `bdd/@burgerportaal/zoeken.feature` (deterministic; onderwerpen-browse + search-experience; ES search-hits not asserted) |
 
 Also fixed: TS1 `configuratie.feature` was flaking on the 30s default — added `@timeout:120000`.
 Parked scenarios are `@blocked` + `Before(@blocked → test.skip(reason))` so they show as _skipped with reason_, never faked green.
 
 ## TS6/TS7 unblocked (2026-07-15)
 
-The blocker was *data*, not code: no account was a member of an authorised
+The blocker was _data_, not code: no account was a member of an authorised
 gebruikersgroep, so `/api/mijn-gebruikersgroepen` was `[]` and the "Nieuwe
 publicatie" form errored. Verified fix, all deterministic:
 
 - **`authProfile` fixture** (`bdd/_core/fixture.ts`) seeds the prerequisite over
-  the **odpc API** (the group *UI* is what TS5 covers): reads the caller's real
+  the **odpc API** (the group _UI_ is what TS5 covers): reads the caller's real
   identity claim from `/api/me` (odpc matches group `GebruikerId` against
   `preferred_username`, case-insensitive — for the admin that is `admin`), creates
   an actief organisatie via the `organisations` fixture, resolves its uuid + a
@@ -38,7 +38,7 @@ publicatie" form errored. Verified fix, all deterministic:
   (carve-out like the onderwerp file input; `act()` was unreliable on the custom
   widgets). Publishing document-less pops a "Ja, publiceren" confirm.
 - Feature `bdd/@gpp-app/publicaties.feature` is `@gpp-app @admin @anthropic
-  @mode:serial @timeout:240000`. **`@admin` is load-bearing**: it loads adminState
+@mode:serial @timeout:240000`. **`@admin` is load-bearing**: it loads adminState
   into the `page` fixture so the org seed (admin add form) and the
   `publicationStatusAdmin` read-back both authenticate. Verification is the
   deterministic admin status read (`gepubliceerd`/`ingetrokken`) — ES/burgerportaal
@@ -55,7 +55,7 @@ Two stack-level blockers had to fall — neither a test-code issue:
    **woo-publications side** was missing: the DRC `zgw_consumers.Service` + the
    `GlobalConfiguration.documents_api_service` + `organisation_rsin`. Provisioned
    idempotently by **`setup/provision-documenten-api.sh`**. After it, `POST
-   /documenten` registers the document in OpenZaak (verified: create → bestandsdeel
+/documenten` registers the document in OpenZaak (verified: create → bestandsdeel
    upload → gepubliceerd).
 
 2. **User-less-token 500 blocked seeding.** Documents can only be seeded through
