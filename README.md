@@ -111,20 +111,60 @@ by a model served through [**OpenRouter**](https://openrouter.ai). They need:
   (it piggybacks the admin SSO session, so no extra TOTP) and saved to
   `.auth/burgerportaal-admin.json`.
 
-**Model by tag.** Each scenario picks its model from its tags; anything untagged
-falls back to a good-enough default. See
-[`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts).
+#### AI model routing (cost control)
 
-| Tag             | OpenRouter model               |
-| --------------- | ------------------------------ |
-| _(none)_        | `google/gemini-2.5-flash`      |
-| `@cheap-ai`     | `google/gemini-2.5-flash-lite` |
-| `@openai`       | `openai/gpt-4.1`               |
-| `@anthropic`    | `anthropic/claude-sonnet-4.5`  |
-| `@expensive-ai` | `anthropic/claude-opus-4.1`    |
+Every Stagehand operation maps to one of three **roles**, and each role picks a
+model by the scenario's **tier** tag. The table lives in
+[`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts) (`ROLE_MODELS`); a run
+routes each call to its own model automatically — no per-step wiring.
+
+| Role (Stagehand op)            | `@cheap-ai`             | _(no tag)_ — default | `@expensive-ai`     |
+| ------------------------------ | ----------------------- | -------------------- | ------------------- |
+| **worker** — `act()`           | `gemini-2.5-flash-lite` | `gpt-4o-mini`        | `claude-sonnet-4.5` |
+| **verification** — `extract()` | `gemini-2.5-flash-lite` | `gpt-4o-mini`        | `claude-sonnet-4.5` |
+| **planner** — `observe()`      | `deepseek-chat` (V3)    | `deepseek-chat` (V3) | `claude-sonnet-4.5` |
+
+**Which tier for which scenario (tag the Feature or Scenario):**
+
+- **No tag → default.** Use for ~everything. This suite is ~98% `act()`
+  (worker), so nearly all cost is the worker model, kept on cheap `gpt-4o-mini`
+  (chosen over `gemini-2.5-flash`, which intermittently returns malformed action
+  JSON that fails Stagehand's schema validation).
+- **`@cheap-ai`** — throwaway/high-volume scenarios where a wrong click just
+  retries. Shifts every role down a tier.
+- **`@expensive-ai`** — genuinely flaky or high-value flows that justify paying
+  for Claude across all roles. All AI features currently run **untagged on the
+  cheap default** — add this per-feature only if a flow proves unreliable.
+
+**Override a specific model** when a tier isn't what you want:
+
+- **Whole scenario/feature** — add a `@model:<openrouter-id>` tag, e.g.
+  `@model:openai/gpt-4.1`. It beats tier + role routing for every op in that
+  scenario.
+- **A single step** (or a few) — wrap the calls in `stagehand.withModel()`:
+
+  ```ts
+  await stagehand.withModel('anthropic/claude-sonnet-4.5', () =>
+    stagehand.act('the one flaky action'))
+  ```
+
+  The model is restored automatically after the callback.
+
+**Marker tag:** `@ai` marks a scenario as Stagehand-driven; it drives the
+skip-guard that skips these scenarios when `OPENROUTER_API_KEY` is unset
+(`@beheer` scenarios have their own guard). Every AI scenario needs `@ai` (or
+`@beheer`).
+
+> **planner is unused today** (0 `observe()` calls) — its row is wired and ready
+> for when the suite adopts `stagehand.agent()`/`observe()`. To add a model,
+> edit one cell in `ROLE_MODELS`.
+
+_Removed legacy:_ the old `@anthropic`/`@openai` provider-pin tags are gone —
+`@anthropic` is now `@ai @expensive-ai`, and arbitrary models use `@model:`.
 
 Run them: `npm run test:beheer` (add `--no-deps` to skip auth setup; set
-`HEADED=1` to watch the AI browser).
+`HEADED=1` to watch the AI browser). Self-check the routing table with
+`node --experimental-strip-types checks/stagehand-routing.check.ts`.
 
 **How it stays portable + test-owned.** Only the UI _mutations_ go through the
 AI (`act()`); assertions are deterministic against the public site — the config
