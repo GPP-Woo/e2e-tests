@@ -18,6 +18,12 @@ dotenv.config({ path: path.resolve(__dirname, '.env') })
  */
 const testDir = defineBddConfig({
   featuresRoot: './bdd',
+  /* Attach a ready-to-paste "Fix with AI" prompt (failing step, error, snippet)
+     to every failing test in the HTML report.
+     https://vitalets.github.io/playwright-bdd/#/configuration/options?id=aifix */
+  aiFix: {
+    promptAttachment: true,
+  },
 })
 
 /**

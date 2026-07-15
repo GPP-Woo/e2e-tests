@@ -9,7 +9,7 @@ const resource = adminResource({
 })
 
 /** A small (≤600×600) PNG the add form accepts as the mandatory afbeelding. */
-export const TOPIC_IMAGE = path.join(__dirname, '..', 'bdd', '@publicatiebank', '@admin', 'fixtures', 'onderwerp.png')
+export const TOPIC_IMAGE = path.join(__dirname, '..', '@admin', 'fixtures', 'onderwerp.png')
 
 /**
  * Create an onderwerp (Topic) through the Django admin. Onderwerpen are
