@@ -9,11 +9,16 @@
  */
 import assert from 'node:assert/strict'
 import {
+  cdpEndpointForWorker,
   makeOpenRouterFetch,
   overrideModelForTags,
   ROLE_MODELS,
   tierForTags,
 } from '../bdd/_core/stagehand.ts'
+
+// --- CDP endpoint (must match the --remote-debugging-port in playwright.config.ts) ---
+assert.equal(cdpEndpointForWorker(0), 'http://127.0.0.1:9330')
+assert.equal(cdpEndpointForWorker(3), 'http://127.0.0.1:9333')
 
 // --- tag resolution ---------------------------------------------------------
 assert.equal(tierForTags([]), 'default')

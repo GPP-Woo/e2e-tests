@@ -16,7 +16,9 @@
 # with a @model:<openrouter-id> tag (e.g. @model:openai/gpt-4.1). See
 # _core/stagehand.ts and the README "AI model routing" table.
 #
-# Requires OPENROUTER_API_KEY (else every scenario skips) — see README.
+# @ai — marks this as a Stagehand scenario: shares the @ai guard (skips without
+# OPENROUTER_API_KEY, and chromium-only since Stagehand attaches to Chromium's
+# CDP port). See _core/stagehand.ts and the README "AI model routing" table.
 #
 # @mode:serial — the burgerportaal configuration is a single global resource, so
 # these scenarios must not run concurrently (a parallel snapshot/restore would
@@ -27,7 +29,7 @@
 # round-trips per act) and then publishes, which comfortably exceeds Playwright's
 # 30s default; the other Stagehand features carry the same override.
 
-@mode:serial @timeout:120000
+@ai @mode:serial @timeout:120000
 Feature: Configureren van het burgerportaal
 
   Background:

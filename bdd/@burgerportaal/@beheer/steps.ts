@@ -3,10 +3,10 @@ import type { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { hasOpenRouterKey, settle, stagehandPage } from '@/bdd/_core/stagehand'
+import { settle, stagehandPage } from '@/bdd/_core/stagehand'
 import { expect } from '@playwright/test'
 import { z } from 'zod'
-import { Before, Given, test, Then, When } from '../../_core/fixture'
+import { Given, Then, When } from '../../_core/fixture'
 import { ENV } from '../../_core/types'
 
 /**
@@ -50,11 +50,9 @@ const FOOTER_LABEL: Record<string, string> = { privacy: 'Privacy', contact: 'Con
 
 const POLL = { timeout: 20_000, intervals: [500, 1000, 2000] }
 
-// Skip the whole feature when no model key is configured, so the rest of the
-// suite stays green without OpenRouter.
-Before({ tags: '@beheer' }, async () => {
-  test.skip(!hasOpenRouterKey(), 'Set OPENROUTER_API_KEY to run the Stagehand @beheer scenarios')
-})
+// The @beheer feature is tagged @ai, so the shared @ai Before hook (in
+// @publicatiebank/@admin/steps.ts) already skips it without OPENROUTER_API_KEY
+// and off Chromium — no feature-specific guard needed here.
 
 Given('the burgerportaal beheer interface is open', async ({ stagehand }) => {
   const page = stagehandPage(stagehand)

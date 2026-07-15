@@ -68,7 +68,19 @@ export default defineConfig({
     },
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        /* Expose CDP so the Stagehand @ai/@beheer scenarios can attach to THIS
+           browser (see bdd/_core/stagehand.ts cdpEndpointForWorker — the port
+           must match: 9330 + the worker's parallel index) and share one traced
+           page. Keep the Keycloak host-resolver arg from the shared `use`. */
+        launchOptions: {
+          args: [
+            '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1',
+            `--remote-debugging-port=${9330 + Number(process.env.TEST_PARALLEL_INDEX ?? 0)}`,
+          ],
+        },
+      },
       dependencies: ['setup'],
     },
     {

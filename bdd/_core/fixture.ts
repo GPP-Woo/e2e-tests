@@ -13,7 +13,7 @@ import { addSelfAddedOrganisation, deleteOrganisationByName } from '@/bdd/@publi
 import { addConceptPublication, deletePublicationByTitel } from '@/bdd/@publicatiebank/support/publication'
 import { addTopic, deleteTopicByName } from '@/bdd/@publicatiebank/support/topic'
 import { signIn as performSignIn } from '@/bdd/_core/signIn'
-import { createStagehand, overrideModelForTags, tierForTags } from '@/bdd/_core/stagehand'
+import { cdpEndpointForWorker, createStagehand, overrideModelForTags, tierForTags } from '@/bdd/_core/stagehand'
 import { adminState, burgerportaalAdminState, regularState } from '@/setup/paths'
 import { request as apiRequest } from '@playwright/test'
 import { test as base, createBdd } from 'playwright-bdd'
@@ -199,15 +199,17 @@ interface BddFixtures {
   /** Anonymous HTTP client for the public burgerportaal sitemap. */
   sitemap: SitemapClient
   /**
-   * AI browser (Stagehand + OpenRouter) for the @beheer scenarios. Runs its own
-   * Chromium with the beheer-admin session injected; the model is chosen from
-   * the scenario tags. Closed automatically in teardown.
+   * AI (Stagehand + OpenRouter) for the @beheer scenarios. Attaches over CDP to
+   * the Playwright-traced `page` context (which carries the beheer-admin
+   * session) and drives it from natural language; the model is chosen from the
+   * scenario tags. Closed automatically in teardown.
    */
   stagehand: Stagehand
   /**
-   * AI browser (Stagehand + OpenRouter) with the publicatiebank Django-admin
-   * session injected, for the @admin metadata scenarios that mutate the admin UI
-   * from natural language. Model chosen from the scenario tags; closed in teardown.
+   * AI (Stagehand + OpenRouter) for the @ai/@admin scenarios that mutate the
+   * publicatiebank/gpp-app UI from natural language. Attaches over CDP to the
+   * Playwright-traced `page` context (which carries the admin session). Model
+   * chosen from the scenario tags; closed in teardown.
    */
   adminStagehand: Stagehand
   /**
@@ -238,14 +240,22 @@ export const test = base.extend<BddFixtures>({
   /**
    * Auth-by-tag: reuse a pre-authenticated session based on the scenario tags.
    * `@admin` / `@regular` load the storage state produced by the `setup`
-   * project; anything else starts signed-out (e.g. the login-flow feature,
-   * which signs in live via a step).
+   * project. The Stagehand scenarios adopt THIS context over CDP (see the
+   * `stagehand`/`adminStagehand` fixtures), so its session must match what the
+   * AI browser needs: `@beheer` → the burgerportaal beheer-admin session, other
+   * `@ai` (e.g. gpp-app gebruikersgroepen) → the admin session (its cookies also
+   * authenticate the gpp-app). Anything else starts signed-out (e.g. the
+   * login-flow feature, which signs in live via a step).
    */
   storageState: async ({ $tags }, use) => {
     if ($tags.includes('@admin'))
       await use(adminState)
     else if ($tags.includes('@regular'))
       await use(regularState)
+    else if ($tags.includes('@beheer'))
+      await use(burgerportaalAdminState)
+    else if ($tags.includes('@ai'))
+      await use(adminState)
     else
       await use(undefined)
   },
@@ -398,20 +408,25 @@ export const test = base.extend<BddFixtures>({
       },
     })
   },
-  stagehand: async ({ $tags }, use) => {
+  stagehand: async ({ page, $tags }, use, testInfo) => {
+    // Depend on `page` so its context — created with the tag-selected
+    // storageState and traced by Playwright — exists before Stagehand attaches
+    // over CDP and adopts it. `about:blank` just materialises the page.
+    await page.goto('about:blank')
     const stagehand = await createStagehand({
       tier: tierForTags($tags),
       overrideModel: overrideModelForTags($tags),
-      storageStatePath: burgerportaalAdminState,
+      cdpUrl: cdpEndpointForWorker(testInfo.parallelIndex),
     })
     await use(stagehand)
     await stagehand.close()
   },
-  adminStagehand: async ({ $tags }, use) => {
+  adminStagehand: async ({ page, $tags }, use, testInfo) => {
+    await page.goto('about:blank')
     const stagehand = await createStagehand({
       tier: tierForTags($tags),
       overrideModel: overrideModelForTags($tags),
-      storageStatePath: adminState,
+      cdpUrl: cdpEndpointForWorker(testInfo.parallelIndex),
     })
     await use(stagehand)
     await stagehand.close()

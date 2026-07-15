@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import process from 'node:process'
 import { CustomOpenAIClient, Stagehand } from '@browserbasehq/stagehand'
 import OpenAI from 'openai'
@@ -162,16 +161,29 @@ export function hasOpenRouterKey(): boolean {
   return !!process.env.OPENROUTER_API_KEY
 }
 
-/** Same Keycloak host mapping the main Playwright config uses (chromium only). */
-const KEYCLOAK_HOST_MAP = '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1'
+/**
+ * CDP HTTP endpoint of the Playwright-launched Chromium for a given worker.
+ * The chromium project launches with `--remote-debugging-port=<this>` (see
+ * playwright.config.ts) and the Stagehand fixtures attach to the same port, so
+ * Stagehand drives the SAME browser/page Playwright traces — one unified trace
+ * per scenario. Keyed on the worker's parallel index so concurrent workers get
+ * distinct ports.
+ */
+export function cdpEndpointForWorker(parallelIndex: number): string {
+  return `http://127.0.0.1:${9330 + parallelIndex}`
+}
 
 export interface StagehandOptions {
   /** Cost tier — usually `tierForTags($tags)`. Ignored when `overrideModel` is set. */
   tier: Tier
   /** Whole-scenario model override — usually `overrideModelForTags($tags)`. */
   overrideModel?: string
-  /** Storage-state file whose cookies get injected to restore an auth session. */
-  storageStatePath?: string
+  /**
+   * CDP endpoint of the Playwright-launched Chromium to attach to. Stagehand
+   * adopts that browser's existing page instead of launching its own, so the
+   * session (storageState) and trace both come from the Playwright context.
+   */
+  cdpUrl: string
 }
 
 /**
@@ -203,11 +215,12 @@ declare module '@browserbasehq/stagehand' {
  * `act`/`extract`/`observe`, and {@link makeOpenRouterFetch} rewrites each
  * outgoing request's `model` to `modelFor(active.role)`.
  *
- * Stagehand launches its own Chromium (separate from Playwright's `page`
- * fixture), so we (a) add the same Keycloak host-resolver arg the main config
- * uses and (b) inject the saved beheer-admin cookies after init — restoring the
- * authenticated session without re-running the OIDC + TOTP flow inside the AI
- * browser.
+ * Stagehand attaches to the Playwright-launched Chromium over CDP
+ * (`opts.cdpUrl`) instead of launching its own browser: it adopts that
+ * browser's existing page, so the authenticated session (the Playwright
+ * context's `storageState`) and the Keycloak host-resolver arg already apply,
+ * and Playwright's own tracing captures the AI actions — one unified trace per
+ * scenario, no cookie injection needed.
  */
 export async function createStagehand(opts: StagehandOptions): Promise<Stagehand> {
   const apiKey = process.env.OPENROUTER_API_KEY
@@ -229,13 +242,26 @@ export async function createStagehand(opts: StagehandOptions): Promise<Stagehand
     }),
   })
 
+  // Resolve the CDP HTTP endpoint to the browser WebSocket URL Stagehand
+  // connects to (Stagehand treats cdpUrl as a raw ws target, so the http base
+  // alone 404s the handshake). /json/version is served by the chromium project's
+  // --remote-debugging-port (see playwright.config.ts).
+  const wsUrl = await fetch(`${opts.cdpUrl}/json/version`)
+    .then(r => r.json() as Promise<{ webSocketDebuggerUrl: string }>)
+    .then(v => v.webSocketDebuggerUrl)
+    .catch((cause) => {
+      throw new Error(`Could not reach Chromium CDP at ${opts.cdpUrl} (is the chromium project's --remote-debugging-port up?)`, { cause })
+    })
+
   const stagehand = new Stagehand({
     env: 'LOCAL',
     llmClient,
     verbose: 0,
+    // Attach to the Playwright-launched Chromium over CDP instead of launching
+    // our own browser: Stagehand adopts that browser's existing page, so it
+    // drives the SAME target Playwright authenticated (storageState) and traces.
     localBrowserLaunchOptions: {
-      headless: !process.env.HEADED,
-      args: [KEYCLOAK_HOST_MAP],
+      cdpUrl: wsUrl,
     },
   })
   await stagehand.init()
@@ -262,12 +288,6 @@ export async function createStagehand(opts: StagehandOptions): Promise<Stagehand
     finally {
       active.override = prev
     }
-  }
-
-  if (opts.storageStatePath && fs.existsSync(opts.storageStatePath)) {
-    const state = JSON.parse(fs.readFileSync(opts.storageStatePath, 'utf-8'))
-    if (Array.isArray(state.cookies) && state.cookies.length)
-      await stagehand.context.addCookies(state.cookies)
   }
 
   return stagehand
