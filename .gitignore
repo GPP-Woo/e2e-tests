@@ -144,3 +144,6 @@ dist
 /blob-report/
 /playwright/.cache/
 .auth
+
+# Throwaway run artifacts (ad-hoc reports/logs kept out of the tree)
+/scratch/
