@@ -30,7 +30,7 @@
     "@browserbasehq/stagehand": "^3.6.0",
     "openai": "^4.104.0",
     "otpauth": "^9.4.0",
-    "zod": "^3.24.3"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.12.0",

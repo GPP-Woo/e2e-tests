@@ -3,7 +3,7 @@ import { z } from 'zod'
 import 'dotenv/config'
 
 const userSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
   otpSecret: z.string().min(1),
 })
@@ -11,9 +11,9 @@ export type User = z.infer<typeof userSchema>
 
 const envSchema = z.object({
   apps: z.object({
-    gppApp: z.string().url(),
-    publicatiebank: z.string().url(),
-    burgerportaal: z.string().url(),
+    gppApp: z.url(),
+    publicatiebank: z.url(),
+    burgerportaal: z.url(),
   }),
   users: z.record(z.string(), userSchema),
   /**
@@ -23,7 +23,7 @@ const envSchema = z.object({
    * headers woo-publications enforces; see `@publicatiebank/support/odrc.ts`.
    */
   odrc: z.object({
-    baseUrl: z.string().url(),
+    baseUrl: z.url(),
     apiKey: z.string().min(1),
   }),
 })
