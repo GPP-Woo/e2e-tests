@@ -254,9 +254,16 @@ search _experience_ (the `/zoeken` results page opens).
 These are present as `@blocked` features that **skip with a reason** (visible in
 the report — never faked green):
 
-- **Testscript 8** (document beheer, `documenten.feature`) — this stack has **no
-  Documents API configured** (`/documenten` POST → 500 "No documents API
-  configured yet"), so no document can exist to manage.
+- **Testscript 8** (document beheer, `documenten.feature`) — implemented, seed
+  works, but **`@fixme`-quarantined** on the "withdraw through the admin" step:
+  `adminDriver.open()`'s Stagehand row-click doesn't reliably land on the
+  *document* change page (its changelist row link differs from the publicatie
+  one), so the deterministic `#id_publicatiestatus` selectOption fails. Fix by
+  navigating to the change page by URL. Also needs **`setup/provision-documenten-api.sh`
+  run once per fresh stack** (wires the Documenten API + live-patches ODRC token
+  auth to `AnonymousUser`, without which the cookieless token seed 500s in the
+  sessionprofile middleware; a `docker compose down`/`up` reverts it — re-run the
+  script). See [`support/document.ts`](./bdd/@publicatiebank/support/document.ts).
 - **Testscripts 6 & 7** (gpp-app publicatie create / wijzig / intrek,
   `@gpp-app/publicaties.feature`) — no available account is a member of an
   **authorised gebruikersgroep** (`/api/mijn-gebruikersgroepen` = `[]`), so the
@@ -385,10 +392,18 @@ signed-out, but Stagehand's own browser gets the saved
 Because `@admin` comes from the folder name, a feature placed in
 `bdd/@publicatiebank/@admin/` runs as admin without any tag in the `.feature`
 file. The `Given I am logged in to ...` steps then just navigate — the session
-is already present. The GPP-app **authentication** feature is the exception: it
-is untagged (no restored session) and signs in **live** through a step, so it
-actually exercises the login flow. `ENV.users` lives in
-[`bdd/_core/types.ts`](./bdd/_core/types.ts).
+is already present.
+
+> **Don't repeat folder-name tags on the `Feature:` line.** tags-from-path
+> already applies every `@`-prefixed path segment, so a feature under
+> `bdd/@publicatiebank/@admin/` is `@publicatiebank @admin` automatically —
+> writing `@publicatiebank @admin` again on the feature line is redundant noise.
+> Only put tags there that the path does **not** give you: `@ai`, `@expensive-ai`,
+> `@mode:serial`, `@timeout:…`, `@no-webkit`, `@fixme`, or a functional
+> `@admin`/`@regular` when the folder isn't already one of those. The GPP-app **authentication** feature is the exception: it
+> is untagged (no restored session) and signs in **live** through a step, so it
+> actually exercises the login flow. `ENV.users` lives in
+> [`bdd/_core/types.ts`](./bdd/_core/types.ts).
 
 ```gherkin
 Feature: Informatiecategorieën management
