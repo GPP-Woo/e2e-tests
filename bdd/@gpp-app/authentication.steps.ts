@@ -16,12 +16,6 @@ Given('I am on the GPP-app', async ({ page }) => {
   await page.goto(ENV.apps.gppApp)
 })
 
-Given('I am logged in to the GPP-app', async ({ page }) => {
-  // Session is restored from storage state (@admin / @regular tag).
-  await page.goto(ENV.apps.gppApp)
-  await expect(page.getByRole('link', { name: 'Mijn publicaties' })).toBeVisible()
-})
-
 When('I sign in to the GPP-app as {string}', async ({ signIn, currentUser }, userKey: string) => {
   const user = ENV.users[userKey]
   if (!user)
