@@ -35,7 +35,8 @@ Given('a published document', async ({ organisations, publications, documents })
 When('I withdraw the document through the admin', async ({ docAdmin, documents }) => {
   await docAdmin.open(documents.last())
   // The publicatiestatus is a native <select>; set it deterministically (act() on
-  // the status dropdown was the flakiest step). Stagehand still opens + saves.
+  // the status dropdown was the flakiest step). open() now settles the change page
+  // first, so the understudy locator finds the rendered <select>.
   await docAdmin.page.locator('#id_publicatiestatus').selectOption('ingetrokken')
   await docAdmin.save()
 })

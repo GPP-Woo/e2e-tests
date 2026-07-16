@@ -78,7 +78,12 @@ Then('the publicatie is known under its new titel and not the old one', async ({
 
 When('I set the publicatiestatus to {string} and save the publicatie', async ({ pubAdmin, publications }, label: string) => {
   await pubAdmin.open(publications.last())
-  await pubAdmin.act(`Select "${label}" as the publicatiestatus`)
+  // The publicatiestatus is a native <select>; set it deterministically (act() on
+  // the status dropdown is the flakiest AI step — see documenten-steps.ts, which
+  // does the same). open() settles the change page first, so the understudy
+  // locator finds the rendered <select>. Option value = lowercased label
+  // (gepubliceerd / ingetrokken / concept). Stagehand still opens + saves.
+  await pubAdmin.page.locator('#id_publicatiestatus').selectOption(label.toLowerCase())
   await pubAdmin.save()
 })
 
