@@ -14,7 +14,9 @@ const publicatiebank: AppName = 'publicatiebank'
 export async function openBeheer(page: Page) {
   await page.goto(ENV.apps[publicatiebank])
   await page.getByRole('link', { name: 'Beheer' }).click()
-  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+  // Crosses a real navigation + admin render; on firefox/webkit against an
+  // emulated backend this exceeds the 5s default expect timeout, so allow more.
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible({ timeout: 15_000 })
 }
 
 /**

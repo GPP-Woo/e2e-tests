@@ -69,6 +69,11 @@ export function adminDriver(stagehand: Stagehand, config: AdminDriverConfig): Ad
     async open(name) {
       await page.goto(`${changelist}?q=${encodeURIComponent(name)}`)
       await act(`Open the ${noun} by clicking its ${rowLink} in the results table`)
+      // Settle the change page before returning — callers interact with its form
+      // fields deterministically (e.g. #id_publicatiestatus) via the Stagehand
+      // understudy locator, which has no auto-wait; without this it can query
+      // before the change page renders (StagehandElementNotFoundError).
+      await settleHere()
     },
     async save() {
       await act(`Click the "Opslaan" button to save the ${noun}`)

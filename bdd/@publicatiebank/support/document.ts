@@ -63,17 +63,39 @@ async function postJson(ctx: APIRequestContext, path: string, data: unknown): Pr
   return JSON.parse(body)
 }
 
+/**
+ * Status-checked GET returning parsed JSON. Retry once on a transient 5xx, then
+ * fail with the actual status + body (a blind `res.json()` would otherwise
+ * surface an HTML error page as an opaque `Unexpected token '<'`).
+ *
+ * NOTE: ODRC 500s this endpoint for token (non-session) requests UNLESS the
+ * `provision-documenten-api.sh` auth patch is applied (it makes token auth return
+ * AnonymousUser instead of None, so the sessionprofile middleware's
+ * `request.user.is_authenticated` doesn't raise). See seedPublishedDocument.
+ */
+async function getJson(ctx: APIRequestContext, path: string): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await ctx.get(new URL(path, API_BASE).href, { headers: tokenHeaders() })
+    const body = await res.text()
+    if (res.status() >= 500 && attempt === 0) {
+      await new Promise(r => setTimeout(r, 1500))
+      continue
+    }
+    if (res.status() >= 400)
+      throw new Error(`GET ${path} -> ${res.status()}: ${body.slice(0, 400)}`)
+    return JSON.parse(body)
+  }
+}
+
 async function firstInformatieCategorieUuid(ctx: APIRequestContext): Promise<string> {
-  const res = await ctx.get(new URL('informatiecategorieen', API_BASE).href, { headers: tokenHeaders() })
-  const uuid = (await res.json()).results?.[0]?.uuid
+  const uuid = (await getJson(ctx, 'informatiecategorieen')).results?.[0]?.uuid
   if (!uuid)
     throw new Error('ODRC has no informatiecategorieen — is the value list seeded?')
   return uuid
 }
 
 async function organisatieUuidByNaam(ctx: APIRequestContext, naam: string): Promise<string> {
-  const res = await ctx.get(new URL('organisaties', API_BASE).href, { headers: tokenHeaders() })
-  const uuid = ((await res.json()).results ?? []).find((o: { naam: string }) => o.naam === naam)?.uuid
+  const uuid = ((await getJson(ctx, 'organisaties')).results ?? []).find((o: { naam: string }) => o.naam === naam)?.uuid
   if (!uuid)
     throw new Error(`Organisatie "${naam}" not found in the ODRC waardelijst`)
   return uuid
@@ -85,6 +107,11 @@ async function organisatieUuidByNaam(ctx: APIRequestContext, naam: string): Prom
  * organisatie (seed one via the `organisations` fixture first). Runs in a
  * throwaway cookieless request context so a stray session cookie never turns the
  * token request into a 401.
+ *
+ * Requires `setup/provision-documenten-api.sh` to have been run on the stack: it
+ * wires the Documenten API and patches ODRC token auth to return AnonymousUser,
+ * without which these token requests 500 in the sessionprofile middleware (see
+ * getJson). A `docker compose down`/`up` reverts the patch — re-run the script.
  */
 export async function seedPublishedDocument(
   publicatieTitel: string,
