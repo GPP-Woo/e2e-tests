@@ -15,9 +15,12 @@
 # read-back both go through the session-authenticated publicatiebank admin.
 # The withdraw scenario seeds its publicatie through the same (slow) Stagehand
 # publish flow before withdrawing, so the whole feature runs on a 240s budget.
-@gpp-app @admin @ai @mode:serial @timeout:240000
+@admin @ai @mode:serial @timeout:240000
 Feature: Publicaties creëren en intrekken in de GPP-app
 
+  # @expensive-ai — the multi-step create+publish wizard flakes on the default
+  # model (publicatie left unpublished); Claude Sonnet completes it reliably.
+  @expensive-ai
   Scenario: Create a publicatie
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I create and publish a publicatie through the gpp-app

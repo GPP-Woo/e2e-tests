@@ -20,7 +20,7 @@
 # WebKit on this stack (a WebKit-specific boot failure; Chromium and Firefox boot
 # it fine), so its steps can never see the search field. Skip on WebKit (see
 # bdd/@burgerportaal/zoeken-steps.ts) rather than fail on an app that won't boot.
-@burgerportaal @admin @mode:serial @timeout:120000 @no-webkit
+@admin @mode:serial @timeout:120000 @no-webkit
 Feature: Zoeken en raadplegen op het GPP-burgerportaal
   As a burger
   I want to search and browse the public portal

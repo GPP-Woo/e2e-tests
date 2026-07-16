@@ -41,6 +41,9 @@ Feature: Configureren van onderwerpen
     When I tick the "Promoot" checkbox and save the onderwerp
     Then the onderwerp is promoted in the API
 
+  # @expensive-ai — the omschrijving edit act flakes on the default model (field
+  # left blank); Claude Sonnet applies it reliably.
+  @expensive-ai
   Scenario: Edit the omschrijving of an onderwerp
     Given an onderwerp
     When I change the onderwerp omschrijving and save it

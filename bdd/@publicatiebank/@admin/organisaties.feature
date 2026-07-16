@@ -46,6 +46,9 @@ Feature: Configureren van organisaties
     When I tick the "Actief" checkbox and save the organisatie
     Then the organisatie is active in the API
 
+  # @expensive-ai — the rename act flakes on the default model; Claude Sonnet
+  # applies it reliably.
+  @expensive-ai
   Scenario: Rename a self-added organisatie
     Given a self-added organisatie
     When I rename the organisatie and save it

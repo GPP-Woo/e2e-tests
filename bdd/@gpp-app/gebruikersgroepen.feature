@@ -12,7 +12,10 @@
 # fetches through the same service token that intermittently 500s under load
 # (see README "Known server flake") and are not exposed on the group list API, so
 # they are not asserted here.
-@gpp-app @ai @mode:serial @timeout:120000
+# @expensive-ai — every scenario is a short Stagehand act and the default model
+# flakes on them (create/rename left unapplied); since they run serially, a
+# first-scenario flake skips the rest, so the whole feature runs on Claude Sonnet.
+@ai @expensive-ai @mode:serial @timeout:120000
 Feature: Gebruikersgroepen beheren in de GPP-app
   As functioneel beheer
   I want to create, rename and delete gebruikersgroepen
