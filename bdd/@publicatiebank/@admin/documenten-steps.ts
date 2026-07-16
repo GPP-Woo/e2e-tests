@@ -1,4 +1,4 @@
-import { documentExistsAdmin, documentStatusAdmin, seedPublishedDocument } from '@/bdd/@publicatiebank/support/document'
+import { documentExistsAdmin, documentStatusAdmin, openDocumentAdmin, seedPublishedDocument } from '@/bdd/@publicatiebank/support/document'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
@@ -32,12 +32,13 @@ Given('a published document', async ({ organisations, publications, documents })
 
 // --- Withdraw (intrekken) ---------------------------------------------------
 
-When('I withdraw the document through the admin', async ({ docAdmin, documents }) => {
-  await docAdmin.open(documents.last())
-  // The publicatiestatus is a native <select>; set it deterministically (act() on
-  // the status dropdown was the flakiest step). open() now settles the change page
-  // first, so the understudy locator finds the rendered <select>.
-  await docAdmin.page.locator('#id_publicatiestatus').selectOption('ingetrokken')
+When('I withdraw the document through the admin', async ({ page, docAdmin, documents }) => {
+  // Open the change page deterministically via the session `page` (same tab as
+  // Stagehand after CDP adoption) — the act() row-click did not reliably land on
+  // the *document* change page. The publicatiestatus is a native <select>; set it
+  // deterministically too (act() on status dropdowns was the flakiest step).
+  await openDocumentAdmin(page, documents.last())
+  await page.locator('#id_publicatiestatus').selectOption('ingetrokken')
   await docAdmin.save()
 })
 
@@ -47,8 +48,8 @@ Then('the document is no longer public', async ({ page, documents }) => {
 
 // --- Delete -----------------------------------------------------------------
 
-When('I delete the document through the admin', async ({ docAdmin, documents }) => {
-  await docAdmin.open(documents.last())
+When('I delete the document through the admin', async ({ page, docAdmin, documents }) => {
+  await openDocumentAdmin(page, documents.last())
   await docAdmin.removeCurrent()
 })
 

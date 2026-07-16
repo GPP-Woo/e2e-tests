@@ -182,6 +182,17 @@ export async function documentStatusAdmin(page: Page, titel: string): Promise<st
   return (cell ?? '').trim().toLowerCase()
 }
 
+/**
+ * Open the document's admin change page deterministically (changelist search →
+ * row click → change-URL assert). The TS8 mutations use this instead of the
+ * Stagehand act() row-click, which did not reliably land on the *document*
+ * change page (StagehandElementNotFoundError on #id_publicatiestatus).
+ */
+export async function openDocumentAdmin(page: Page, titel: string): Promise<void> {
+  if (!(await resource.open(page, titel)))
+    throw new Error(`Document "${titel}" not found in the admin changelist`)
+}
+
 /** Delete a document by exact officiële titel via the admin. No-op if already gone. */
 export function deleteDocumentByTitel(page: Page, titel: string) {
   return resource.remove(page, titel)
