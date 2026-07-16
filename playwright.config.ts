@@ -39,8 +39,14 @@ export default defineConfig({
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
+  /* Retries. The Stagehand @ai scenarios are inherently non-deterministic — an
+     act() occasionally misfires (rotating across scenarios run-to-run), and the
+     SPA/admin teardown can time out on a slow firefox/webkit under emulated-
+     backend load. A single retry absorbs these transient flakes without masking a
+     real, reproducible failure (which fails twice). CI retries twice (slower,
+     noisier infra); locally once. @expensive-ai on the repeat offenders lowers
+     the first-attempt miss rate so the retry is rarely needed. */
+  retries: process.env.CI ? 2 : 1,
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
@@ -86,11 +92,18 @@ export default defineConfig({
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
+      /* @ai (Stagehand) scenarios drive Chromium over CDP, which firefox/webkit
+         don't expose — so they can only run in the chromium project. Excluding
+         them here (not just via a runtime Before-skip) also stops the shared
+         global resources they mutate (e.g. the burgerportaal config) from being
+         clobbered by a parallel browser. */
+      grepInvert: /@ai/,
       dependencies: ['setup'],
     },
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+      grepInvert: /@ai/,
       dependencies: ['setup'],
     },
   ],
