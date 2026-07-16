@@ -1,13 +1,14 @@
 import { signInToBurgerportaalBeheer } from '@/bdd/@burgerportaal/support/login'
 import { verifyWaardelijstPresent } from '@/bdd/@publicatiebank/support/information-category'
+import { adminState, burgerportaalAdminState, regularState } from '@/bdd/_core/roles'
 import { signIn } from '@/bdd/_core/signIn'
 import { ENV } from '@/bdd/_core/types'
 import { test as setup } from '@playwright/test'
-import { adminState, burgerportaalAdminState, regularState } from './paths'
 
 /**
- * Sign in once per role and persist the session. Runs serially as a project
- * dependency before the BDD tests.
+ * Sign in once per role and persist the session; the role registry (which tag
+ * selects which session) lives in `bdd/_core/roles.ts`. Runs serially as a
+ * project dependency before the BDD tests.
  *
  * The admin logs into the GPP-app first (full Keycloak flow incl. TOTP), which
  * establishes a realm-wide SSO session; signing into the publicatiebank admin

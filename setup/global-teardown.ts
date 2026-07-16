@@ -5,27 +5,32 @@ import { deleteCategoryByName, listE2ECategoryNames } from '@/bdd/@publicatieban
 import { deleteOrganisationByName, listE2EOrganisationNames } from '@/bdd/@publicatiebank/support/organisation'
 import { deletePublicationByTitel, listE2EPublicationTitels } from '@/bdd/@publicatiebank/support/publication'
 import { deleteTopicByName, listE2ETopicNames } from '@/bdd/@publicatiebank/support/topic'
+import { adminState } from '@/bdd/_core/roles'
+import { sortByDependsOn } from '@/bdd/_core/topo'
 import { request as apiRequest, chromium } from '@playwright/test'
-import { adminState } from './paths'
 
 /**
  * One admin-swept resource: how to list `E2E `-prefixed leftovers and how to
- * delete one. Adding a new metadata resource is one row here, not a new block.
+ * delete one. Adding a new metadata resource is one row here, not a new block;
+ * FK ordering is declared per row via `dependsOn` and topo-sorted, never
+ * hand-maintained through array position.
  */
 interface AdminSweep {
   label: string
+  /** Labels that must be swept before this one (their rows block deletion). */
+  dependsOn?: string[]
   list: (page: Page) => Promise<string[]>
   remove: (page: Page, name: string) => Promise<void>
 }
 
-const ADMIN_SWEEPS: AdminSweep[] = [
+const ADMIN_SWEEPS: AdminSweep[] = sortByDependsOn([
   { label: 'categories', list: listE2ECategoryNames, remove: deleteCategoryByName },
   { label: 'organisaties', list: listE2EOrganisationNames, remove: deleteOrganisationByName },
   { label: 'onderwerpen', list: listE2ETopicNames, remove: deleteTopicByName },
-  // Documents before publicaties: a document belongs to a publicatie.
   { label: 'documenten', list: listE2EDocumentTitels, remove: deleteDocumentByTitel },
-  { label: 'publicaties', list: listE2EPublicationTitels, remove: deletePublicationByTitel },
-]
+  // A document belongs to a publicatie, so documenten must be swept first.
+  { label: 'publicaties', dependsOn: ['documenten'], list: listE2EPublicationTitels, remove: deletePublicationByTitel },
+])
 
 /**
  * Safety net for data ownership: scenarios delete the `E2E `-prefixed rows they
