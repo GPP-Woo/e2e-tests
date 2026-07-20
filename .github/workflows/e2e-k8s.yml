@@ -1,0 +1,92 @@
+name: E2E on local k8s
+# Spins up the whole GPP stack from the Helm charts in a kind cluster (same hack/up.sh
+# used locally) and runs the Playwright suite against it. Validates the real charts on every PR.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: e2e-tests }
+      # Sibling checkouts: hack/up.sh builds every app image from source (no emulation, and
+      # the published Django/openzaak images are amd64-only), so all app repos must be here.
+      # open-zaak is cloned by up.sh itself.
+      - uses: actions/checkout@v4
+        with: { repository: GPP-Woo/charts, path: charts }
+      - uses: actions/checkout@v4
+        with: { repository: GPP-Woo/GPP-app, ref: feat/local-dev-stack, path: GPP-app }
+      - uses: actions/checkout@v4
+        with: { repository: GPP-Woo/GPP-burgerportaal, ref: feat/local-dev-stack, path: GPP-burgerportaal }
+      - uses: actions/checkout@v4
+        with: { repository: GPP-Woo/GPP-publicatiebank, path: GPP-publicatiebank }
+      - uses: actions/checkout@v4
+        # submodules: shared/dotgithub provides fileTypes.json, required by the image build
+        with: { repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true }
+
+      # Installs kind + kubectl + helm and creates the cluster with our port mappings.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: gpp-e2e
+          config: charts/hack/kind-config.yaml
+
+      - name: Raise vm.max_map_count for Elasticsearch (ECK)
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      - name: Bring up the GPP stack from charts
+        working-directory: charts
+        run: USE_EXISTING_CLUSTER=1 bash hack/up.sh
+
+      - uses: actions/setup-node@v4
+        with: { node-version: lts/* }
+      - name: Install e2e deps
+        working-directory: e2e-tests
+        run: |
+          npm ci
+          npx playwright install --with-deps
+
+      - name: Run Playwright suite
+        working-directory: e2e-tests
+        env:
+          # Local realm test users (from charts/dev/infra/files/realm.json).
+          DEFAULT_EMAIL: user@example.com
+          DEFAULT_PASSWORD: user
+          DEFAULT_OTP_SECRET: gpp-user-otp-seed-0001
+          ADMIN_EMAIL: admin@example.com
+          ADMIN_PASSWORD: admin
+          ADMIN_OTP_SECRET: gpp-admin-otp-seed-0001
+          # NodePort URLs (see charts/hack/kind-config.yaml).
+          GPP_APP_BASE_URL: http://localhost:8130
+          GPP_PUBLICATIEBANK_BASE_URL: http://localhost:8000
+          GPP_BURGERPORTAAL_BASE_URL: http://localhost:8140
+          ODRC_BASE_URL: http://localhost:8000
+          ODRC_API_KEY: insecure-ea1a8d297e3b2d3313b8a30b18959c3
+          GPP_ZOEKEN_BASE_URL: http://localhost:8110
+          # OpenZaak Documenten API (dev/openzaak chart); client creds come from the
+          # auto-loaded configuration.json fixture.
+          OPENZAAK_BASE_URL: http://localhost:8001
+          DRC_ROOT: http://localhost:8001/documenten/api/v1/
+          OPENZAAK_CLIENT_ID: woo-publications-dev
+          OPENZAAK_SECRET: insecure-yQL9Rzh4eHGVmYx5w3J2gu
+        run: npm test
+
+      - name: Dump cluster state on failure
+        if: ${{ failure() }}
+        run: |
+          kubectl -n gpp-e2e get pods -o wide || true
+          kubectl -n gpp-e2e get elasticsearch || true
+          helm list -n gpp-e2e || true
+          kubectl -n gpp-e2e describe pods || true
+          for l in odpc odbp odrc zoeken; do
+            kubectl -n gpp-e2e logs -l app.kubernetes.io/instance=$l --tail=100 || true
+          done
+          kubectl -n gpp-e2e logs -l app=openzaak --tail=100 || true
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: e2e-tests/playwright-report
