@@ -35,9 +35,14 @@ jobs:
           config: charts/hack/kind-config.yaml
 
       # hack/up.sh passes `helm upgrade --force-conflicts` (server-side apply),
-      # which only exists in Helm >= 3.18. The runner's pre-installed Helm is older.
-      - uses: azure/setup-helm@v4
-        with: {version: v3.18.0} # first release with server-side apply / --force-conflicts
+      # added in Helm 3.18. The runner's pre-installed Helm is older, and
+      # azure/setup-helm caches into a nested dir it doesn't add to PATH, so
+      # install over /usr/local/bin/helm directly and verify the version wins.
+      - name: Install Helm >= 3.18
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+            | DESIRED_VERSION=v3.18.0 bash
+          helm version
 
       - name: Raise vm.max_map_count for Elasticsearch (ECK)
         run: sudo sysctl -w vm.max_map_count=262144
