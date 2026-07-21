@@ -32,6 +32,16 @@ jobs:
         # submodules: shared/dotgithub provides fileTypes.json, required by the image build
         with: {repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true}
 
+      # Building every app image from source + loading them into the kind node
+      # fills the runner's ~14 GB disk, so `playwright install --with-deps` then
+      # fails with "No space left on device". Reclaim the big preinstalled
+      # toolchains we don't use (Android SDK ~9 GB, .NET, GHC, Swift).
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/share/boost /usr/share/swift /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
       # Installs kind + kubectl + helm and creates the cluster with our port mappings.
       - uses: helm/kind-action@v1
         with:
