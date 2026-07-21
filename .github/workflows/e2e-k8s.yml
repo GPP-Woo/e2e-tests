@@ -9,6 +9,10 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # Single source of truth: keep in sync with the Helm used locally for
+      # hack/up.sh (needs Helm 4 for `--server-side --force-conflicts`).
+      HELM_VERSION: v4.2.3
     steps:
       - uses: actions/checkout@v4
         with: {path: e2e-tests}
@@ -34,14 +38,15 @@ jobs:
           cluster_name: gpp-e2e
           config: charts/hack/kind-config.yaml
 
-      # hack/up.sh passes `helm upgrade --force-conflicts` (server-side apply),
-      # added in Helm 3.18. The runner's pre-installed Helm is older, and
-      # azure/setup-helm caches into a nested dir it doesn't add to PATH, so
-      # install over /usr/local/bin/helm directly and verify the version wins.
-      - name: Install Helm >= 3.18
+      # hack/up.sh uses `helm upgrade --server-side --force-conflicts`, which is
+      # a Helm 4 feature. Pin the exact version we develop against (HELM_VERSION)
+      # so the runner, up.sh and this pipeline all run the same Helm. get-helm-3
+      # only fetches Helm 3, so install the v4 tarball straight over PATH.
+      - name: Install Helm ${{ env.HELM_VERSION }}
         run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
-            | DESIRED_VERSION=v3.18.0 bash
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar xz
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          rm -rf linux-amd64
           helm version
 
       - name: Raise vm.max_map_count for Elasticsearch (ECK)
