@@ -115,7 +115,7 @@ Then('the self-added organisatie is shown in the admin results', async ({ page, 
 
 // --- Sort (changelist ordering under test) ---------------------------------
 
-When('I sort the organisatie changelist by the {string} column', async (_, _column: string) => {
+When('I sort the organisatie changelist by the {string} column', async ({}, _column: string) => {
   // Impl: orgAdmin.act(`Click the "${_column}" column header to sort the table`), then settle.
   throw new Error('TODO: click the changelist column header via orgAdmin.act to sort by naam')
 })
@@ -156,7 +156,7 @@ Then('the same organisaties are available in the GPP-app gebruikersgroep waardel
 
 // --- Logging: "Toon logs" on a self-added organisatie ----------------------
 
-When('I open the organisatie logs via {string}', async (_, _button: string) => {
+When('I open the organisatie logs via {string}', async ({}, _button: string) => {
   // Impl: orgAdmin.act(`Click the "${_button}" button on the organisatie detail page`), then settle.
   throw new Error('TODO: open the organisatie logs by clicking the "Toon logs" button via orgAdmin.act')
 })

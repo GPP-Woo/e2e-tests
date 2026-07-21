@@ -28,4 +28,13 @@ export default antfu({
     'ts/no-floating-promises': 'off',
     'ts/await-thenable': 'off',
   },
+}).append({
+  // playwright-bdd requires a step's first arg to be an object-destructuring
+  // pattern (it introspects fixture names from it). Steps that need no fixtures
+  // but do take capture args must therefore be `async ({}, arg) => …`, which
+  // trips no-empty-pattern. The framework contract wins here.
+  files: ['**/*.steps.ts'],
+  rules: {
+    'no-empty-pattern': 'off',
+  },
 })

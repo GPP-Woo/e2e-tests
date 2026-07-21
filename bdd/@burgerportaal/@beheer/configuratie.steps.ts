@@ -241,6 +241,6 @@ Then('the public {string} footer link points to the new URL', async ({ beheerSta
 // Implement: page.goto(`${base}/`), assert the footer anchor labelled
 // FOOTER_LABEL[which] is no longer rendered (locator count 0) once its URL was
 // removed and republished.
-Then('the public {string} footer link is no longer shown', async (_, which: string) => {
+Then('the public {string} footer link is no longer shown', async ({}, which: string) => {
   throw new Error(`TODO: assert the "${FOOTER_LABEL[which]}" footer link is no longer rendered in the footer`)
 })

@@ -123,12 +123,12 @@ When('I submit an empty burgerportaal search', async () => {
   throw new Error('TODO: submit the burgerportaal search with an empty query')
 })
 
-When('I search the burgerportaal with the boolean query {string}', async (_, query: string) => {
+When('I search the burgerportaal with the boolean query {string}', async ({}, query: string) => {
   // Impl: fill #search-field with the AND/OR query arg, submit, waitForURL(/\/zoeken/).
   throw new Error(`TODO: submit the burgerportaal search with a boolean AND/OR query: ${query}`)
 })
 
-When('I search the burgerportaal for the exact phrase {string}', async (_, phrase: string) => {
+When('I search the burgerportaal for the exact phrase {string}', async ({}, phrase: string) => {
   // Impl: fill #search-field with the phrase arg wrapped in double quotes, submit,
   // waitForURL(/\/zoeken/).
   throw new Error(`TODO: submit the burgerportaal search with a quoted exact phrase: ${phrase}`)
