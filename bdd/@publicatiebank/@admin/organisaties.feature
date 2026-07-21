@@ -63,3 +63,39 @@ Feature: Configureren van organisaties
     Given a self-added organisatie
     When I search the admin for the self-added organisatie
     Then the self-added organisatie is shown in the admin results
+
+  # --- @todo: Testscript 4 coverage gaps (gap matrix rows 56-65) --------------
+  # Drafted from the manual testscript; the step bodies below are stubs that
+  # throw, and the @todo Before hook (bdd/_core/todo.steps.ts) skips-with-reason
+  # so they never fake a pass. Remove @todo once the bodies land.
+
+  @todo
+  Scenario: Sort the organisaties alphabetically by name
+    When I sort the organisatie changelist by the "Naam" column
+    Then the organisaties are listed in alphabetical order by name
+
+  @todo
+  Scenario: Filter the organisaties on active state
+    Given a self-added organisatie
+    When I filter the organisatie changelist on active organisaties
+    Then only active organisaties are shown in the results
+
+  @todo
+  Scenario: Active organisaties match the GPP-app waardelijst
+    Given a self-added organisatie
+    When I list the active organisaties in the admin
+    Then the same organisaties are available in the GPP-app gebruikersgroep waardelijst
+
+  @todo
+  Scenario: Editing a self-added organisatie is logged
+    Given a self-added organisatie
+    When I rename the organisatie and save it
+    And I open the organisatie logs via "Toon logs"
+    Then the edit is recorded in the organisatie logs
+
+  @todo
+  Scenario: Deleting a self-added organisatie is audit-logged
+    Given a self-added organisatie
+    When I delete the organisatie through the admin
+    And I open the audit log items
+    Then the deletion of the organisatie is recorded in the audit log

@@ -43,7 +43,7 @@ Feature: Configureren van het burgerportaal
   # The beheer form only accepts a YouTube/Vimeo *embed* URL (see the ?-help in
   # the UI); a plain watch?v= link is rejected.
   Scenario: Promotievideo instellen en weer wissen
-    When I set the promotion video URL to "https://www.youtube.com/embed/aqz-KE-bpKQ"
+    When I set the promotion video URL to "https://www.youtube.com/embed/cE0wfjsybIQ?si=5GAhLcJ3gevv6oLl"
     And I publish the homepage settings
     Then the public homepage has a promotion video
     When I clear the promotion video URL
@@ -74,3 +74,69 @@ Feature: Configureren van het burgerportaal
     When I remove the "privacy" footer link
     And I publish the external links
     Then the public "privacy" footer link is empty
+
+  # ---------------------------------------------------------------------------
+  # @todo — gaps vs. manual TS1: the green scenarios above verify the config
+  # (API / image bytes) but NOT what a burger actually sees on the rendered
+  # public site. These @todo scenarios close that gap and are skipped-with-reason
+  # by the global Before({tags:'@todo'}) hook until their step bodies land.
+  # ---------------------------------------------------------------------------
+
+  # Matrix "Open the citizen portal" (Partial): no dedicated step proved the
+  # public portal simply loads for a burger.
+  @todo
+  Scenario: Het burgerportaal laadt voor een burger
+    When I open the public homepage as a burger
+    Then the public homepage loads successfully
+
+  # Matrix "Add/Remove promotion video" (Partial): videoUrl config is checked,
+  # but not that the embedded YouTube/Vimeo iframe is rendered / gone.
+  @todo
+  Scenario: Promotievideo verschijnt en verdwijnt op de burger-homepage
+    When I set the promotion video URL to "https://www.youtube.com/embed/cE0wfjsybIQ?si=5GAhLcJ3gevv6oLl"
+    And I publish the homepage settings
+    Then the public homepage renders the promotion video iframe
+    When I clear the promotion video URL
+    And I publish the homepage settings
+    Then the public homepage renders no promotion video iframe
+
+  # Matrix "Replace the logo" (Partial): bytes changed, but not that the homepage
+  # displays the new logo.
+  @todo
+  Scenario: De burger-homepage toont het nieuwe logo
+    When I replace the "logo" image
+    Then the public homepage displays the new logo
+
+  # Matrix "Replace the favicon" (Partial): file changed, but not that the browser
+  # is served the new favicon.
+  @todo
+  Scenario: De burger-homepage gebruikt het nieuwe favicon
+    When I replace the "favicon" image
+    Then the public homepage links to the new favicon
+
+  # Matrix "Replace the atmosphere image" (Partial): bytes changed, but not that
+  # the homepage displays the new sfeerfoto.
+  @todo
+  Scenario: De burger-homepage toont de nieuwe sfeerfoto
+    When I replace the "image" image
+    Then the public homepage displays the new sfeerfoto
+
+  # Matrix "Change the organisation website URL" (Partial): websiteUrl config is
+  # checked, but not that the "Naar de gemeente" link points at the new URL.
+  @todo
+  Scenario: De link "Naar de gemeente" wijst naar de nieuwe organisatie-URL
+    When I set the organisation website URL to "https://e2e.example.org/gemeente"
+    And I publish the external links
+    Then the "Naar de gemeente" link points to the new organisation website URL
+
+  # Matrix "Change/Remove footer links" (Partial): the config values are checked,
+  # but not the footer anchors' href on the public site, nor that a removed link
+  # disappears.
+  @todo
+  Scenario: Voettekst-link wijst naar de nieuwe URL en verdwijnt na verwijderen
+    When I set the "privacy" footer link to "https://e2e.example.org/privacy"
+    And I publish the external links
+    Then the public "privacy" footer link points to the new URL
+    When I remove the "privacy" footer link
+    And I publish the external links
+    Then the public "privacy" footer link is no longer shown

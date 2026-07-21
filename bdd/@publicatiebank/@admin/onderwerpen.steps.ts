@@ -99,3 +99,67 @@ Then('the onderwerp is shown in the admin results', async ({ page, topics }) => 
   // admin deterministically (topicExists searches the changelist too).
   expect(await topicExists(page, titel)).toBe(true)
 })
+
+// --- @todo stubs: gaps vs. manual testscript 3 (bodies not yet implemented) -
+// Registered so bddgen stays green; the @todo Before hook skips the scenarios.
+
+// --- Sort (UI read under test) ---------------------------------------------
+
+When('I sort the onderwerpen list by titel', async () => {
+  // Impl: topicAdmin.act('Click the "Officiële titel" column header to sort ascending').
+  throw new Error('TODO: sort the onderwerpen changelist by clicking the titel column header')
+})
+
+Then('the onderwerpen are listed in alphabetical order by titel', async () => {
+  // Impl: read the changelist titel column via `page` and assert it equals its sorted copy.
+  throw new Error('TODO: read the changelist titel column and assert ascending alphabetical order')
+})
+
+// --- Filter (UI read under test) -------------------------------------------
+
+When('I filter the onderwerpen list in the admin', async () => {
+  // Impl: topicAdmin.act('Apply a filter from the right-hand filter sidebar').
+  throw new Error('TODO: apply an admin filter from the right-hand onderwerp filter sidebar')
+})
+
+Then('only onderwerpen matching the filter remain visible', async () => {
+  // Impl: read the filtered changelist rows via `page` and assert every row matches the filter.
+  throw new Error('TODO: assert every visible changelist row matches the applied filter')
+})
+
+// --- Compare with the GPP-app (cross-application) --------------------------
+
+When('I open a GPP-app gebruikersgroep to compare onderwerpen', async () => {
+  // Impl: drive the gpp-app admin (appStagehand) to open a gebruikersgroep and read its onderwerpen,
+  // or read them over the odpc API (see @gpp-app/support/usergroup.ts).
+  throw new Error('TODO: open a GPP-app gebruikersgroep and collect its onderwerpen for comparison')
+})
+
+Then('the onderwerp appears in the gebruikersgroep onderwerpen in the GPP-app', async () => {
+  // Impl: assert topics.last() is present among the gebruikersgroep onderwerpen read above.
+  throw new Error('TODO: assert the onderwerp is listed among the GPP-app gebruikersgroep onderwerpen')
+})
+
+// --- Logging after edit ("Toon logs") --------------------------------------
+
+When('I open the "Toon logs" view for the onderwerp', async () => {
+  // Impl: topicAdmin.act('Click the "Toon logs" button on the onderwerp detail page').
+  throw new Error('TODO: open the "Toon logs" view from the onderwerp detail page')
+})
+
+Then('the omschrijving edit is recorded in the onderwerp logs', async () => {
+  // Impl: read the logs page via `page` and assert an entry for the omschrijving change (scratch 'topic:omschrijving').
+  throw new Error('TODO: assert the onderwerp logs contain an entry for the omschrijving edit')
+})
+
+// --- Audit logging after delete --------------------------------------------
+
+When('I open the onderwerp audit log', async () => {
+  // Impl: navigate via `page` to the "Logging" tab / (audit)logitems changelist and search for the onderwerp.
+  throw new Error('TODO: open the (audit)logitems changelist under the Logging tab')
+})
+
+Then('the onderwerp deletion is recorded in the audit log', async () => {
+  // Impl: assert an audit logitem records the deletion of topics.last() (read the audit changelist via `page`).
+  throw new Error('TODO: assert the audit log contains a delete entry for the onderwerp')
+})

@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "bddgen": "bddgen",
+    "dev": "bddgen && playwright test --ui --project=chromium",
     "test": "bddgen && playwright test",
     "test:ui": "bddgen && playwright test --ui",
     "test:admin": "bddgen && playwright test --grep @admin",

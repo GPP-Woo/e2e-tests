@@ -171,3 +171,76 @@ When('I remove the {string} footer link', async ({ stagehand }, which: string) =
 Then('the public {string} footer link is empty', async ({ beheer }, which: string) => {
   await expect.poll(() => resource(beheer, FOOTER_FIELD[which]), POLL).toBe('')
 })
+
+// ===========================================================================
+// @todo stubs — gaps vs. manual TS1: verify the RENDERED public site, not just
+// the config. These are registered so bddgen stays green; the @todo Before hook
+// (bdd/_core/todo.steps.ts) skips the scenarios, so the bodies never execute.
+// Assertions read the public site deterministically through the plain Playwright
+// `page` fixture (public pages need no auth), mirroring the sibling admin steps.
+// ===========================================================================
+
+// Implement: page.goto(`${base}/`), settle, then assert a landmark of the burger
+// homepage is visible (e.g. the search field #search-field, or the header) so we
+// prove the portal renders — not merely that navigation returned a response.
+When('I open the public homepage as a burger', async ({ page }) => {
+  await page.goto(`${base}/`)
+  throw new Error('TODO: goto the public homepage and settle so the load can be asserted')
+})
+
+Then('the public homepage loads successfully', async ({ page }) => {
+  throw new Error('TODO: assert a burger-facing landmark (e.g. #search-field / main header) is visible on the public homepage')
+})
+
+// Implement: page.goto(`${base}/`), then assert an <iframe> whose src points at
+// the configured YouTube/Vimeo embed (resource(beheer,'videoUrl')) is present.
+Then('the public homepage renders the promotion video iframe', async ({ page, beheer }) => {
+  throw new Error('TODO: assert the homepage renders an <iframe> with src matching the configured videoUrl embed')
+})
+
+// Implement: page.goto(`${base}/`), then assert no promotion-video <iframe> is
+// present (locator count is 0) once the videoUrl has been cleared.
+Then('the public homepage renders no promotion video iframe', async ({ page }) => {
+  throw new Error('TODO: assert the homepage renders no promotion-video <iframe> after the video URL was cleared')
+})
+
+// Implement: page.goto(`${base}/`), read the rendered logo <img> src, fetch its
+// bytes and assert the sha matches the uploaded fixture (beheer.getPublicImage /
+// FIXTURE_IMAGES.logo) rather than the pre-test logo.
+Then('the public homepage displays the new logo', async ({ page, beheer }) => {
+  throw new Error('TODO: read the homepage logo <img> and assert its bytes match the uploaded logo fixture')
+})
+
+// Implement: page.goto(`${base}/`), read <link rel="icon">/<link rel="shortcut
+// icon"> href, fetch it and assert its sha matches the uploaded favicon fixture.
+Then('the public homepage links to the new favicon', async ({ page, beheer }) => {
+  throw new Error('TODO: read the <link rel="icon"> href and assert its bytes match the uploaded favicon fixture')
+})
+
+// Implement: page.goto(`${base}/`), read the rendered sfeerfoto <img> (or CSS
+// background-image) and assert its bytes match the uploaded image fixture.
+Then('the public homepage displays the new sfeerfoto', async ({ page, beheer }) => {
+  throw new Error('TODO: read the homepage sfeerfoto image and assert its bytes match the uploaded sfeerfoto fixture')
+})
+
+// Implement: page.goto(`${base}/`), locate the top-right "Naar de gemeente"
+// anchor and assert its href equals beheerState.expected.get('websiteUrl').
+Then('the "Naar de gemeente" link points to the new organisation website URL', async ({ page, beheerState }) => {
+  const url = beheerState.expected.get('websiteUrl')!
+  throw new Error(`TODO: assert the "Naar de gemeente" link href equals ${url}`)
+})
+
+// Implement: page.goto(`${base}/`), locate the footer anchor by its label
+// (FOOTER_LABEL[which]) and assert its href equals beheerState.expected
+// .get(`footer:${which}`).
+Then('the public {string} footer link points to the new URL', async ({ page, beheerState }, which: string) => {
+  const url = beheerState.expected.get(`footer:${which}`)!
+  throw new Error(`TODO: assert the "${FOOTER_LABEL[which]}" footer link href equals ${url}`)
+})
+
+// Implement: page.goto(`${base}/`), assert the footer anchor labelled
+// FOOTER_LABEL[which] is no longer rendered (locator count 0) once its URL was
+// removed and republished.
+Then('the public {string} footer link is no longer shown', async ({ page }, which: string) => {
+  throw new Error(`TODO: assert the "${FOOTER_LABEL[which]}" footer link is no longer rendered in the footer`)
+})
