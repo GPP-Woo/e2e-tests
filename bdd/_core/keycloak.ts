@@ -52,7 +52,11 @@ export async function fillKeycloakLogin(page: Page, user: User) {
   if (!(await otp.isVisible()))
     return
 
-  const totp = new TOTP({ secret: Secret.fromBase32(user.otpSecret) })
+  // Keycloak stores the realm's TOTP secretData.value as a raw string and uses
+  // its UTF-8 bytes directly as the HMAC key (it Base32-encodes only for the QR
+  // code). Our seeds (e.g. "gpp-user-otp-seed-0001") aren't valid Base32, so
+  // decode them the same way Keycloak keys them: from UTF-8, not Base32.
+  const totp = new TOTP({ secret: Secret.fromUTF8(user.otpSecret) })
 
   for (let attempt = 0; attempt < 3; attempt++) {
     await otp.fill(totp.generate())
