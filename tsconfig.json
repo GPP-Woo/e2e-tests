@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "lib": ["ES2022", "DOM"], // ES2022: Error(msg, { cause }); DOM: fetch/Response
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"] // This mapping is relative to "baseUrl".

@@ -11,21 +11,22 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-        with: { path: e2e-tests }
+        with: {path: e2e-tests}
       # Sibling checkouts: hack/up.sh builds every app image from source (no emulation, and
       # the published Django/openzaak images are amd64-only), so all app repos must be here.
       # open-zaak is cloned by up.sh itself.
       - uses: actions/checkout@v4
-        with: { repository: GPP-Woo/charts, path: charts }
+        # hack/ (up.sh, kind-config.yaml) lives on this branch, not charts' main yet.
+        with: {repository: GPP-Woo/charts, ref: explore/local-via-k3d, path: charts}
       - uses: actions/checkout@v4
-        with: { repository: GPP-Woo/GPP-app, ref: feat/local-dev-stack, path: GPP-app }
+        with: {repository: GPP-Woo/GPP-app, ref: feat/local-dev-stack, path: GPP-app}
       - uses: actions/checkout@v4
-        with: { repository: GPP-Woo/GPP-burgerportaal, ref: feat/local-dev-stack, path: GPP-burgerportaal }
+        with: {repository: GPP-Woo/GPP-burgerportaal, ref: feat/local-dev-stack, path: GPP-burgerportaal}
       - uses: actions/checkout@v4
-        with: { repository: GPP-Woo/GPP-publicatiebank, path: GPP-publicatiebank }
+        with: {repository: GPP-Woo/GPP-publicatiebank, path: GPP-publicatiebank}
       - uses: actions/checkout@v4
         # submodules: shared/dotgithub provides fileTypes.json, required by the image build
-        with: { repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true }
+        with: {repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true}
 
       # Installs kind + kubectl + helm and creates the cluster with our port mappings.
       - uses: helm/kind-action@v1
@@ -41,7 +42,7 @@ jobs:
         run: USE_EXISTING_CLUSTER=1 bash hack/up.sh
 
       - uses: actions/setup-node@v4
-        with: { node-version: lts/* }
+        with: {node-version: lts/*}
       - name: Install e2e deps
         working-directory: e2e-tests
         run: |
