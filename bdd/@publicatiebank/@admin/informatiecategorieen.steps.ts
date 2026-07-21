@@ -189,7 +189,7 @@ Given('I have changed the omschrijving of the self-added information category', 
   throw new Error('TODO: open categories.last() and save a changed omschrijving')
 })
 
-When('I open the {string} view from the change page', async ({}, linkName: string) => {
+When('I open the {string} view from the change page', async (_, linkName: string) => {
   // Navigate: click the "Toon logs" button (linkName) on the category change
   // page to reach its logging view.
   throw new Error(`TODO: click the "${linkName}" button on the change page`)
@@ -233,7 +233,7 @@ Given('I have deleted the self-added information category through the UI', async
   throw new Error('TODO: delete categories.last() through the admin UI')
 })
 
-When('I open the {string} via the {string} tab', async ({}, section: string, tab: string) => {
+When('I open the {string} via the {string} tab', async (_, section: string, tab: string) => {
   // Navigate: open the top "Logging" tab (tab) and its "(audit)logitems"
   // changelist (section).
   throw new Error(`TODO: open "${section}" under the "${tab}" tab`)

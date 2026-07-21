@@ -208,7 +208,7 @@ Then('its sitemap information categories match the publication', async () => {
   throw new Error('TODO: compare sitemap informatiecategorie values with the parent publicatie categories')
 })
 
-Then('its manually added category appears as {string}', async ({}, expected: string) => {
+Then('its manually added category appears as {string}', async (_, expected: string) => {
   // The manually added category must be serialised as `expected` (landelijke waardenlijst substitution).
   throw new Error(`TODO: assert the manually added category is serialised as "${expected}" in the sitemap`)
 })

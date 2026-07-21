@@ -115,12 +115,12 @@ Then('the self-added organisatie is shown in the admin results', async ({ page, 
 
 // --- Sort (changelist ordering under test) ---------------------------------
 
-When('I sort the organisatie changelist by the {string} column', async ({ orgAdmin }, _column: string) => {
+When('I sort the organisatie changelist by the {string} column', async (_, _column: string) => {
   // Impl: orgAdmin.act(`Click the "${_column}" column header to sort the table`), then settle.
   throw new Error('TODO: click the changelist column header via orgAdmin.act to sort by naam')
 })
 
-Then('the organisaties are listed in alphabetical order by name', async ({ page }) => {
+Then('the organisaties are listed in alphabetical order by name', async () => {
   // Impl: read the `th.field-naam a` cells off the changelist on `page` and assert
   // the array equals its locale-sorted copy (see admin-resource nameCell selector).
   throw new Error('TODO: read the naam column off the changelist and assert ascending order')
@@ -128,12 +128,12 @@ Then('the organisaties are listed in alphabetical order by name', async ({ page 
 
 // --- Filter (right-side "actief" filter under test) ------------------------
 
-When('I filter the organisatie changelist on active organisaties', async ({ orgAdmin }) => {
+When('I filter the organisatie changelist on active organisaties', async () => {
   // Impl: orgAdmin.act('Use the filter on the right to show only actieve organisaties'), then settle.
   throw new Error('TODO: apply the right-hand "actief" changelist filter via orgAdmin.act')
 })
 
-Then('only active organisaties are shown in the results', async ({ page, organisations }) => {
+Then('only active organisaties are shown in the results', async () => {
   // Impl: for each naam in the filtered changelist assert organisationIsActive(page, naam) is true;
   // at minimum confirm the tracked self-added org (created actief) is present.
   throw new Error('TODO: assert every organisatie in the filtered results is active')
@@ -141,13 +141,13 @@ Then('only active organisaties are shown in the results', async ({ page, organis
 
 // --- Cross-application: publicatiebank vs GPP-app waardelijst ---------------
 
-When('I list the active organisaties in the admin', async ({ page, scratch }) => {
+When('I list the active organisaties in the admin', async () => {
   // Impl: filter the changelist to actief and collect the naam cells, storing the
   // set in `scratch` (JSON) for the Then to compare against the GPP-app.
   throw new Error('TODO: collect the active organisatie names from the admin into scratch')
 })
 
-Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async ({ scratch }) => {
+Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async () => {
   // Impl: read the gpp-app waardelijst via a session ctx (apiRequest.newContext({ storageState: adminState }))
   // and GET /api/v2/organisaties (see @gpp-app/support/usergroup resolveOrganisatieUuid); assert the
   // scratch set of active names is a subset of the GPP-app organisatie namen.
@@ -156,12 +156,12 @@ Then('the same organisaties are available in the GPP-app gebruikersgroep waardel
 
 // --- Logging: "Toon logs" on a self-added organisatie ----------------------
 
-When('I open the organisatie logs via {string}', async ({ orgAdmin }, _button: string) => {
+When('I open the organisatie logs via {string}', async (_, _button: string) => {
   // Impl: orgAdmin.act(`Click the "${_button}" button on the organisatie detail page`), then settle.
   throw new Error('TODO: open the organisatie logs by clicking the "Toon logs" button via orgAdmin.act')
 })
 
-Then('the edit is recorded in the organisatie logs', async ({ page, organisations }) => {
+Then('the edit is recorded in the organisatie logs', async () => {
   // Impl: on the logs page (session `page`), assert a "gewijzigd"/"Naam" entry exists
   // for the renamed organisatie (organisations.last()).
   throw new Error('TODO: assert the rename shows as a wijzigings-logregel for the organisatie')
@@ -169,12 +169,12 @@ Then('the edit is recorded in the organisatie logs', async ({ page, organisation
 
 // --- Audit logging after delete (Logging tab → (audit)logitems) ------------
 
-When('I open the audit log items', async ({ orgAdmin }) => {
+When('I open the audit log items', async () => {
   // Impl: orgAdmin.act('Open the "Logging" tab and go to the (audit)logitems list'), then settle.
   throw new Error('TODO: navigate to the (audit)logitems changelist via the Logging tab')
 })
 
-Then('the deletion of the organisatie is recorded in the audit log', async ({ page, organisations }) => {
+Then('the deletion of the organisatie is recorded in the audit log', async () => {
   // Impl: search the (audit)logitems changelist on `page` for the deleted organisatie naam
   // (organisations.last()) and assert a "verwijderd"/delete entry is present.
   throw new Error('TODO: assert a delete audit-logitem exists for the removed organisatie')

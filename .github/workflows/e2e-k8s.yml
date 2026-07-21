@@ -34,6 +34,11 @@ jobs:
           cluster_name: gpp-e2e
           config: charts/hack/kind-config.yaml
 
+      # hack/up.sh passes `helm upgrade --force-conflicts` (server-side apply),
+      # which only exists in Helm >= 3.18. The runner's pre-installed Helm is older.
+      - uses: azure/setup-helm@v4
+        with: {version: v3.18.0} # first release with server-side apply / --force-conflicts
+
       - name: Raise vm.max_map_count for Elasticsearch (ECK)
         run: sudo sysctl -w vm.max_map_count=262144
 

@@ -128,7 +128,10 @@ Then('the concept publicatie appears in my publicaties list', async () => {
 
 Given('a concept publicatie owned by the signed-in user', async ({ authProfile, adminStagehand, publications, scratch }) => {
   // Seed like the withdraw Given but stop at "Opslaan als concept" (add a saveAsConceptViaUi helper).
-  void authProfile; void adminStagehand; void publications; void scratch
+  void authProfile
+  void adminStagehand
+  void publications
+  void scratch
   throw new Error('TODO: seed a concept (unpublished) publicatie via a saveAsConceptViaUi helper')
 })
 
@@ -206,13 +209,15 @@ When('I open the publicatie from the Mijn publicaties menu', async () => {
 
 Then('the publicatie is shown as gepubliceerd before I edit it', async ({ page, publications }) => {
   // Confirm the published state deterministically before the edit steps run.
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the opened publicatie status is gepubliceerd (admin read-back)')
 })
 
 Given('the signed-in user is authorised for a second gebruikersgroep', async ({ authProfile, scratch }) => {
   // Seed a second authorised profiel (second authProfile.seed()) so the profiel picker offers a choice.
-  void authProfile; void scratch
+  void authProfile
+  void scratch
   throw new Error('TODO: seed a second authorised gebruikersgroep for the profiel switch')
 })
 
@@ -285,7 +290,10 @@ Then('the Bekijk online button is no longer shown on the publicatie', async () =
 
 Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ authProfile, adminStagehand, publications, scratch }) => {
   // Seed a shared gebruikersgroep + a published publicatie owned by a *different* member (colleague) via API/admin.
-  void authProfile; void adminStagehand; void publications; void scratch
+  void authProfile
+  void adminStagehand
+  void publications
+  void scratch
   throw new Error('TODO: seed a colleague-owned published publicatie in a shared gebruikersgroep')
 })
 

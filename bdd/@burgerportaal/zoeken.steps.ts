@@ -123,12 +123,12 @@ When('I submit an empty burgerportaal search', async () => {
   throw new Error('TODO: submit the burgerportaal search with an empty query')
 })
 
-When('I search the burgerportaal with the boolean query {string}', async ({}, query: string) => {
+When('I search the burgerportaal with the boolean query {string}', async (_, query: string) => {
   // Impl: fill #search-field with the AND/OR query arg, submit, waitForURL(/\/zoeken/).
   throw new Error(`TODO: submit the burgerportaal search with a boolean AND/OR query: ${query}`)
 })
 
-When('I search the burgerportaal for the exact phrase {string}', async ({}, phrase: string) => {
+When('I search the burgerportaal for the exact phrase {string}', async (_, phrase: string) => {
   // Impl: fill #search-field with the phrase arg wrapped in double quotes, submit,
   // waitForURL(/\/zoeken/).
   throw new Error(`TODO: submit the burgerportaal search with a quoted exact phrase: ${phrase}`)
@@ -140,16 +140,16 @@ When('I search the burgerportaal by clicking the Zoeken button', async () => {
   throw new Error('TODO: submit the burgerportaal search by clicking the Zoeken button')
 })
 
-When("I search the burgerportaal for a term in a document's contents", async () => {
+When('I search the burgerportaal for a term in a document\'s contents', async () => {
   // Impl (skipped by design): search for a term known to live inside a seeded
   // document's file contents; needs an active Elasticsearch index.
-  throw new Error("TODO: search for a term that only appears in a document's file contents")
+  throw new Error('TODO: search for a term that only appears in a document\'s file contents')
 })
 
-When("I search the burgerportaal for a term in an onderwerp's titel", async () => {
+When('I search the burgerportaal for a term in an onderwerp\'s titel', async () => {
   // Impl (skipped by design): search for a term from the seeded onderwerp titel;
   // needs an active Elasticsearch index.
-  throw new Error("TODO: search for a term from a seeded onderwerp's titel")
+  throw new Error('TODO: search for a term from a seeded onderwerp\'s titel')
 })
 
 Then('the matching publicatie appears in the search results', async () => {

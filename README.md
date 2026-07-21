@@ -257,7 +257,7 @@ the report — never faked green):
 - **Testscript 8** (document beheer, `documenten.feature`) — implemented, seed
   works, but **`@fixme`-quarantined** on the "withdraw through the admin" step:
   `adminDriver.open()`'s Stagehand row-click doesn't reliably land on the
-  *document* change page (its changelist row link differs from the publicatie
+  _document_ change page (its changelist row link differs from the publicatie
   one), so the deterministic `#id_publicatiestatus` selectOption fails. Fix by
   navigating to the change page by URL. Also needs **`setup/provision-documenten-api.sh`
   run once per fresh stack** (wires the Documenten API + live-patches ODRC token

@@ -127,7 +127,10 @@ When('I change the {string} of the publicatie through the admin', async ({ pubAd
   // (select2 for informatiecategorieën/onderwerpen, raw-id for publisher/
   // verantwoordelijke/eigenaar, date input, plain text for verkorte titel/
   // kenmerken); stash it in scratch under `pub:field:<field>`; then save().
-  void field; void pubAdmin; void publications; void scratch
+  void field
+  void pubAdmin
+  void publications
+  void scratch
   throw new Error('TODO: edit the given metadata field of publications.last() via pubAdmin and stash the new value in scratch')
 })
 
@@ -135,7 +138,10 @@ Then('the {string} persists after reopening the publicatie', async ({ page, publ
   // Impl: reopen publications.last() through the session `page` and assert the
   // field-specific read (new support helper e.g. publicationFieldAdmin) equals
   // the value stashed under `pub:field:<field>` — via expect.poll(..., READ).
-  void field; void page; void publications; void scratch
+  void field
+  void page
+  void publications
+  void scratch
   throw new Error('TODO: reopen the publicatie and assert the edited field equals the scratch-stashed value')
 })
 
@@ -145,7 +151,9 @@ When('I bulk-change the eigenaar groep from the publicatie changelist', async ({
   // Impl: open the publicatie changelist, tick publications.last()'s row, pick
   // the "eigenaar (groep) wijzigen" admin bulk action, choose a groep and
   // confirm; stash the chosen groep under `pub:field:eigenaar (groep)`.
-  void pubAdmin; void publications; void scratch
+  void pubAdmin
+  void publications
+  void scratch
   throw new Error('TODO: run the eigenaar-groep bulk action on the changelist for publications.last()')
 })
 
@@ -154,21 +162,24 @@ When('I bulk-change the eigenaar groep from the publicatie changelist', async ({
 Then('the audit log shows an edit entry for the publicatie', async ({ page, publications }) => {
   // Impl: goto /admin/logging/timelinelogproxy (audit logitems), filter q=titel,
   // assert a row with an "update"/"gewijzigd" action for publications.last().
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the audit logitems list has an update entry for publications.last()')
 })
 
 Then('the audit log shows a withdrawal entry for the publicatie', async ({ page, publications }) => {
   // Impl: same audit logitems list; assert an entry whose change sets
   // publicatiestatus -> ingetrokken for publications.last().
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the audit logitems list records the withdrawal of publications.last()')
 })
 
 Then('the audit log shows a deletion entry for the publicatie', async ({ page, publications }) => {
   // Impl: same audit logitems list; assert a "delete"/"verwijderd" action entry
   // for the (now-deleted) publications.last() titel survives after deletion.
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the audit logitems list records the deletion of publications.last()')
 })
 
@@ -177,14 +188,17 @@ Then('the audit log shows a deletion entry for the publicatie', async ({ page, p
 Then('the Burgerportaal shows the new omschrijving for the publicatie', async ({ page, publications, scratch }) => {
   // Impl: goto ENV.apps.burgerportaal, search publications.last(), open the
   // detail page and assert it contains scratch.get('pub:omschrijving').
-  void page; void publications; void scratch
+  void page
+  void publications
+  void scratch
   throw new Error('TODO: assert the Burgerportaal detail page shows the edited omschrijving')
 })
 
 Then('the Burgerportaal no longer shows the publicatie', async ({ page, publications }) => {
   // Impl: goto ENV.apps.burgerportaal, search publications.last() and assert it
   // returns no results (expect.poll for cache/index lag, per manual F5 tip).
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the Burgerportaal search no longer returns publications.last()')
 })
 
@@ -193,7 +207,8 @@ Then('the Burgerportaal no longer shows the publicatie', async ({ page, publicat
 Then('the publicatie change form is read-only', async ({ page, publications }) => {
   // Impl: open publications.last() change form; assert the mutable fields
   // (#id_officiele_titel etc.) are disabled/absent and no _save button shows.
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the withdrawn publicatie change form exposes no editable fields')
 })
 
@@ -202,13 +217,15 @@ Then('the publicatie change form is read-only', async ({ page, publications }) =
 When('I search the admin for the publicatie and open it', async ({ pubAdmin, publications }) => {
   // Impl: pubAdmin.search(publications.last()) then click the matching result
   // row link to land on the change form (pubAdmin.open reuses this navigation).
-  void pubAdmin; void publications
+  void pubAdmin
+  void publications
   throw new Error('TODO: search the admin for publications.last() and open the matching result')
 })
 
 Then('the publicatie change form is shown', async ({ page, publications }) => {
   // Impl: assert the change form for publications.last() is open — the
   // #id_officiele_titel input value equals the titel.
-  void page; void publications
+  void page
+  void publications
   throw new Error('TODO: assert the change form for publications.last() is displayed')
 })
