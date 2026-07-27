@@ -40,63 +40,53 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # Before hook) until the gpp-app SPA driver grows the matching helpers.
   # ==========================================================================
 
-  @todo
   Scenario: Select onderwerpen when creating a publicatie
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I select one or more onderwerpen while creating a publicatie
     Then the publicatie is linked to the selected onderwerpen
 
-  @todo
   Scenario: An uploaded document takes its title and date from the file
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I upload a document to a new publicatie
     Then the document title is derived from the filename
     And the document date is filled in automatically
 
-  @todo
   Scenario: Publishing with missing required fields shows validation messages
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I try to publish a new publicatie with only a titel
     Then the gpp-app shows validation messages for the missing required fields
 
-  @todo
   Scenario: Save a publicatie as concept via the confirmation dialog
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I save a new publicatie as concept and confirm the concept dialog
     Then I return to the gpp-app homepage
     And the concept publicatie appears in my publicaties list
 
-  @todo
   Scenario: Reopen a concept publicatie from my publicaties
     Given a concept publicatie owned by the signed-in user
     When I open the concept publicatie from my publicaties list
     Then the concept publicatie opens with its saved details
 
-  @todo
   Scenario: Search my publicaties by date
     Given a published publicatie owned by the signed-in user
     When I search my publicaties by date
     Then the matching publicatie is shown in my publicaties list
 
-  @todo
   Scenario: Filter my publicaties by informatiecategorie, onderwerp and status
     Given a published publicatie owned by the signed-in user
     When I filter my publicaties by informatiecategorie, onderwerp and publicatiestatus
     Then only the matching publicaties are shown in my publicaties list
 
-  @todo
   Scenario: Sort my publicaties by titel
     Given a published publicatie owned by the signed-in user
     When I sort my publicaties by titel
     Then my publicaties are ordered by titel
 
-  @todo
   Scenario: Sort my publicaties by registratiedatum
     Given a published publicatie owned by the signed-in user
     When I sort my publicaties by registratiedatum
     Then my publicaties are ordered by registratiedatum
 
-  @todo
   Scenario: Open a publicatie from the search results
     Given a published publicatie owned by the signed-in user
     When I open a publicatie from my publicaties search results

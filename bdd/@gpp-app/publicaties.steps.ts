@@ -1,20 +1,32 @@
-import { publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
+import path from 'node:path'
+import { publicationOnderwerpenAdmin, publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
-import { createAndPublishViaUi, withdrawViaUi } from './support/publicatie-ui'
+import {
+  addDocumentToNewPublicatieViaUi,
+  attemptPublishWithOnlyTitelViaUi,
+  conceptStatusBanner,
+  createAndPublishViaUi,
+  DOCUMENT_FIXTURE,
+  documentDatumField,
+  documentTitelField,
+  filterPublicatiesViaUi,
+  openPublicatieViaUi,
+  saveAsConceptViaUi,
+  searchPublicatiesByDateViaUi,
+  sortPublicatiesViaUi,
+  visiblePublicatieTitels,
+  visibleRegistratiedatums,
+  withdrawViaUi,
+} from './support/publicatie-ui'
 
 /**
  * Testscripts 6 & 7 (eindgebruiker publicatie flows) steps. The authorised
  * gebruikersgroep prerequisite is seeded over the odpc API (`authProfile`
- * fixture); the create/withdraw *mutations* run through the gpp-app SPA via
- * Stagehand `act()` on the `adminStagehand` browser (its adminState cookies
- * authenticate the gpp-app — the admin is the AD-beheerder). Assertions read the
- * publicatiestatus back deterministically through the publicatiebank Django admin
- * (session-authenticated `page`), because the token API is unreliable while
- * Stagehand drives the same server (see README "Known server flake").
- *
- * The `@ai` skip guard (no OpenRouter key → skip) is shared with the other
- * Stagehand features (see @publicatiebank/@admin/steps.ts).
+ * fixture); the create/withdraw *mutations* run through the gpp-app SPA directly
+ * on the session-authenticated `page` (its adminState cookies authenticate the
+ * gpp-app — the admin is the AD-beheerder). The same `page` also reads the
+ * publicatiestatus back deterministically through the publicatiebank Django admin.
  */
 
 const READ = { timeout: 15_000, intervals: [500, 1000, 2000] }
@@ -28,9 +40,9 @@ Given('the signed-in user belongs to an authorised gebruikersgroep', async ({ au
   scratch.set('informatiecategorieUuid', informatiecategorieUuid)
 })
 
-When('I create and publish a publicatie through the gpp-app', async ({ adminStagehand, publications, scratch }) => {
+When('I create and publish a publicatie through the gpp-app', async ({ page, publications, scratch }) => {
   const titel = publications.freshName()
-  await createAndPublishViaUi(adminStagehand, {
+  await createAndPublishViaUi(page, {
     profielUuid: scratch.get('profielUuid')!,
     organisatieUuid: scratch.get('organisatieUuid')!,
     informatiecategorieUuid: scratch.get('informatiecategorieUuid')!,
@@ -49,22 +61,191 @@ Then('the publicatie is public on the burgerportaal', async ({ page, publication
 
 // --- Withdraw (intrekken) ---------------------------------------------------
 
-Given('a published publicatie owned by the signed-in user', async ({ page, adminStagehand, authProfile, publications }) => {
+Given('a published publicatie owned by the signed-in user', async ({ page, authProfile, publications, topics, scratch }) => {
   const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed()
   const titel = publications.freshName()
-  await createAndPublishViaUi(adminStagehand, { profielUuid, organisatieUuid, informatiecategorieUuid, titel })
+  // Link an onderwerp too, so scenarios that filter/read it back have a real value.
+  const onderwerpTitel = await topics.add()
+  await createAndPublishViaUi(page, { profielUuid, organisatieUuid, informatiecategorieUuid, titel, onderwerpTitels: [onderwerpTitel] })
   publications.track(titel)
+  scratch.set('informatiecategorieUuid', informatiecategorieUuid)
+  scratch.set('onderwerpTitel', onderwerpTitel)
   // Make sure it actually published before the scenario withdraws it.
   await expect.poll(() => publicationStatusAdmin(page, titel), READ).toBe('gepubliceerd')
 })
 
-When('I withdraw the publicatie through the gpp-app', async ({ adminStagehand, publications }) => {
-  await withdrawViaUi(adminStagehand, publications.last())
+When('I withdraw the publicatie through the gpp-app', async ({ page, publications }) => {
+  await withdrawViaUi(page, publications.last())
 })
 
 Then('the publicatie is no longer public', async ({ page, publications }) => {
   const titel = publications.last()
   await expect.poll(() => publicationStatusAdmin(page, titel), READ).toBe('ingetrokken')
+})
+
+// --- Select onderwerpen ------------------------------------------------------
+// Onderwerpen are not gated by the profiel's autorisaties (unlike organisatie /
+// informatiecategorie), so a couple are seeded ad hoc through the `topics`
+// fixture and selected by their visible titel in the "Onderwerpen" section.
+
+When('I select one or more onderwerpen while creating a publicatie', async ({ page, publications, topics, scratch }) => {
+  const titel = publications.freshName()
+  const onderwerpTitels = [await topics.add(), await topics.add()]
+  await createAndPublishViaUi(page, {
+    profielUuid: scratch.get('profielUuid')!,
+    organisatieUuid: scratch.get('organisatieUuid')!,
+    informatiecategorieUuid: scratch.get('informatiecategorieUuid')!,
+    titel,
+    onderwerpTitels,
+  })
+  publications.track(titel)
+  scratch.set('onderwerpTitels', onderwerpTitels.join('|'))
+})
+
+Then('the publicatie is linked to the selected onderwerpen', async ({ page, publications, scratch }) => {
+  const titel = publications.last()
+  const onderwerpTitels = scratch.get('onderwerpTitels')!.split('|')
+  await expect.poll(() => publicationOnderwerpenAdmin(page, titel), READ).toEqual(expect.arrayContaining(onderwerpTitels))
+})
+
+// --- Upload a document -------------------------------------------------------
+// Choosing a file is enough to trigger the auto-derivation under test; the
+// publicatie is deliberately never saved/published, so no cleanup is needed.
+
+When('I upload a document to a new publicatie', async ({ page, scratch }) => {
+  await addDocumentToNewPublicatieViaUi(page, {
+    profielUuid: scratch.get('profielUuid')!,
+    filePath: DOCUMENT_FIXTURE,
+  })
+})
+
+Then('the document title is derived from the filename', async ({ page }) => {
+  await expect(documentTitelField(page)).toHaveValue(path.parse(DOCUMENT_FIXTURE).name)
+})
+
+Then('the document date is filled in automatically', async ({ page }) => {
+  await expect(documentDatumField(page)).not.toHaveValue('')
+})
+
+// --- Required-field validation ------------------------------------------------
+// Organisatie and informatiecategorie are the two other required fields on the
+// form (see createAndPublishViaUi); leaving both empty and publishing should
+// surface a field-scoped message for each rather than one generic error.
+
+When('I try to publish a new publicatie with only a titel', async ({ page, publications, scratch }) => {
+  const titel = publications.freshName()
+  await attemptPublishWithOnlyTitelViaUi(page, {
+    profielUuid: scratch.get('profielUuid')!,
+    titel,
+  })
+})
+
+Then('the gpp-app shows validation messages for the missing required fields', async ({ page }) => {
+  await expect(page.getByRole('alert', { name: /organisatie/i })).toBeVisible()
+  await expect(page.getByRole('alert', { name: /informatiecategorie/i })).toBeVisible()
+})
+
+// --- Save as concept ---------------------------------------------------------
+// A concept only needs a titel (see saveAsConceptViaUi); saving redirects back
+// to the gpp-app homepage, which for a signed-in eindgebruiker is Mijn publicaties.
+
+When('I save a new publicatie as concept and confirm the concept dialog', async ({ page, publications, scratch }) => {
+  const titel = publications.freshName()
+  await saveAsConceptViaUi(page, {
+    profielUuid: scratch.get('profielUuid')!,
+    titel,
+  })
+  publications.track(titel)
+})
+
+Then('I return to the gpp-app homepage', async ({ page }) => {
+  await expect(page.getByRole('button', { name: 'Nieuwe publicatie' })).toBeVisible()
+})
+
+Then('the concept publicatie appears in my publicaties list', async ({ page, publications }) => {
+  await expect(page.getByText(publications.last(), { exact: true })).toBeVisible()
+})
+
+// --- Reopen a concept -------------------------------------------------------
+
+Given('a concept publicatie owned by the signed-in user', async ({ page, authProfile, publications }) => {
+  const { profielUuid } = await authProfile.seed()
+  const titel = publications.freshName()
+  await saveAsConceptViaUi(page, { profielUuid, titel })
+  publications.track(titel)
+})
+
+When('I open the concept publicatie from my publicaties list', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
+})
+
+Then('the concept publicatie opens with its saved details', async ({ page, publications }) => {
+  await expect(page.locator('#titel')).toHaveValue(publications.last())
+  await expect(conceptStatusBanner(page)).toBeVisible()
+})
+
+// --- Search by date ----------------------------------------------------------
+
+When('I search my publicaties by date', async ({ page }) => {
+  // The publicatie was just created, so its registratiedatum is today.
+  const today = new Date().toISOString().slice(0, 10)
+  await searchPublicatiesByDateViaUi(page, today)
+})
+
+Then('the matching publicatie is shown in my publicaties list', async ({ page, publications }) => {
+  await expect(page.getByText(publications.last(), { exact: true })).toBeVisible()
+})
+
+// --- Filter by informatiecategorie, onderwerp and status ---------------------
+// The Given links the publicatie to a real onderwerp (see above) so all three
+// filters can be applied at once with values the publicatie actually matches.
+
+When('I filter my publicaties by informatiecategorie, onderwerp and publicatiestatus', async ({ page, scratch }) => {
+  await filterPublicatiesViaUi(page, {
+    informatiecategorieUuid: scratch.get('informatiecategorieUuid')!,
+    onderwerpTitel: scratch.get('onderwerpTitel')!,
+    status: 'gepubliceerd',
+  })
+})
+
+Then('only the matching publicaties are shown in my publicaties list', async ({ page, publications }) => {
+  await expect(page.getByText(publications.last(), { exact: true })).toBeVisible()
+})
+
+// --- Sort by titel -----------------------------------------------------------
+
+When('I sort my publicaties by titel', async ({ page }) => {
+  await sortPublicatiesViaUi(page, 'titel')
+})
+
+Then('my publicaties are ordered by titel', async ({ page }) => {
+  const titels = await visiblePublicatieTitels(page).allTextContents()
+  const sorted = [...titels].sort((a, b) => a.localeCompare(b))
+  expect(titels).toEqual(sorted)
+})
+
+// --- Sort by registratiedatum -------------------------------------------------
+// The plain (unprefixed) sort option is ascending in this app's DRF-style
+// ordering convention (mirrored by the "-registratiedatum" descending option).
+
+When('I sort my publicaties by registratiedatum', async ({ page }) => {
+  await sortPublicatiesViaUi(page, 'registratiedatum')
+})
+
+Then('my publicaties are ordered by registratiedatum', async ({ page }) => {
+  const dates = await visibleRegistratiedatums(page)
+  const ascending = [...dates].map(d => d.getTime()).sort((a, b) => a - b)
+  expect(dates.map(d => d.getTime())).toEqual(ascending)
+})
+
+// --- Open from search results ------------------------------------------------
+
+When('I open a publicatie from my publicaties search results', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
+})
+
+Then('the publicatie opens with its saved details', async ({ page, publications }) => {
+  await expect(page.locator('#titel')).toHaveValue(publications.last())
 })
 
 // ===========================================================================
@@ -75,125 +256,6 @@ Then('the publicatie is no longer public', async ({ page, publications }) => {
 // ===========================================================================
 
 // --- TS6 gaps: creëren van een publicatie ----------------------------------
-
-When('I select one or more onderwerpen while creating a publicatie', async () => {
-  // Extend createAndPublishViaUi to tick onderwerp checkboxes by uuid; track them for the assertion.
-  throw new Error('TODO: select onderwerpen in the Nieuwe publicatie form (Stagehand act + id/value clicks)')
-})
-
-Then('the publicatie is linked to the selected onderwerpen', async () => {
-  // Read the publicatie back through the publicatiebank admin and assert its onderwerpen match.
-  throw new Error('TODO: assert the created publicatie carries the selected onderwerpen (admin read-back)')
-})
-
-When('I upload a document to a new publicatie', async () => {
-  // Drive the document upload widget in the wizard (setInputFiles on the hidden file input, like the onderwerp add form).
-  throw new Error('TODO: upload a document to a new publicatie via the wizard file input')
-})
-
-Then('the document title is derived from the filename', async () => {
-  // Read the document title field and assert it equals the uploaded filename (sans extension).
-  throw new Error('TODO: assert the document title is auto-filled from the filename')
-})
-
-Then('the document date is filled in automatically', async () => {
-  // Assert the "datum document" input is non-empty after upload.
-  throw new Error('TODO: assert the document date is auto-filled after upload')
-})
-
-When('I try to publish a new publicatie with only a titel', async () => {
-  // Fill only #titel, leave organisatie/informatiecategorie empty, then click "Publiceren".
-  throw new Error('TODO: submit the Nieuwe publicatie form with only a titel via Stagehand act')
-})
-
-Then('the gpp-app shows validation messages for the missing required fields', async () => {
-  // Assert the form shows validation errors for the required organisatie/informatiecategorie fields.
-  throw new Error('TODO: assert required-field validation messages are visible (Stagehand observe / page locator)')
-})
-
-When('I save a new publicatie as concept and confirm the concept dialog', async () => {
-  // Click "Opslaan als concept" then confirm the "weet je het zeker" dialog; track the titel.
-  throw new Error('TODO: save as concept and confirm the dialog via Stagehand act')
-})
-
-Then('I return to the gpp-app homepage', async () => {
-  // Assert the SPA navigated back to the gpp-app root (Mijn publicaties homepage) after saving.
-  throw new Error('TODO: assert the app returned to the homepage (URL / heading via stagehandPage)')
-})
-
-Then('the concept publicatie appears in my publicaties list', async () => {
-  // Assert the just-saved concept titel is listed on the homepage (Stagehand observe or admin read-back as concept).
-  throw new Error('TODO: assert the concept publicatie appears in the Mijn publicaties list')
-})
-
-Given('a concept publicatie owned by the signed-in user', async ({ authProfile, adminStagehand, publications, scratch }) => {
-  // Seed like the withdraw Given but stop at "Opslaan als concept" (add a saveAsConceptViaUi helper).
-  void authProfile
-  void adminStagehand
-  void publications
-  void scratch
-  throw new Error('TODO: seed a concept (unpublished) publicatie via a saveAsConceptViaUi helper')
-})
-
-When('I open the concept publicatie from my publicaties list', async () => {
-  // From Mijn publicaties, click the tracked concept titel to open it.
-  throw new Error('TODO: open the concept publicatie by titel from Mijn publicaties (Stagehand act)')
-})
-
-Then('the concept publicatie opens with its saved details', async () => {
-  // Assert the opened form shows the concept titel and status = concept.
-  throw new Error('TODO: assert the reopened concept shows its saved titel/details')
-})
-
-When('I search my publicaties by date', async () => {
-  // Use the Mijn publicaties date filter/search control for the tracked publicatie's registratiedatum.
-  throw new Error('TODO: search Mijn publicaties by date via Stagehand act')
-})
-
-Then('the matching publicatie is shown in my publicaties list', async () => {
-  // Assert the tracked titel is present in the filtered results.
-  throw new Error('TODO: assert the matching publicatie is listed after the date search')
-})
-
-When('I filter my publicaties by informatiecategorie, onderwerp and publicatiestatus', async () => {
-  // Apply the list filters for the tracked publicatie's category/topic/status.
-  throw new Error('TODO: apply informatiecategorie/onderwerp/status filters via Stagehand act')
-})
-
-Then('only the matching publicaties are shown in my publicaties list', async () => {
-  // Assert the tracked titel is shown and non-matching ones are filtered out.
-  throw new Error('TODO: assert only matching publicaties remain after filtering')
-})
-
-When('I sort my publicaties by titel', async () => {
-  // Click the "Titel" sort control on Mijn publicaties.
-  throw new Error('TODO: sort Mijn publicaties by titel via Stagehand act')
-})
-
-Then('my publicaties are ordered by titel', async () => {
-  // Read the visible list order and assert it is sorted by titel.
-  throw new Error('TODO: assert the list is ordered by titel')
-})
-
-When('I sort my publicaties by registratiedatum', async () => {
-  // Click the "Registratiedatum" sort control on Mijn publicaties.
-  throw new Error('TODO: sort Mijn publicaties by registratiedatum via Stagehand act')
-})
-
-Then('my publicaties are ordered by registratiedatum', async () => {
-  // Read the visible list order and assert it is sorted by registratiedatum.
-  throw new Error('TODO: assert the list is ordered by registratiedatum')
-})
-
-When('I open a publicatie from my publicaties search results', async () => {
-  // Search for the tracked titel, then click the result to open it.
-  throw new Error('TODO: open a publicatie from the search results (Stagehand act)')
-})
-
-Then('the publicatie opens with its saved details', async () => {
-  // Assert the opened detail view shows the tracked titel.
-  throw new Error('TODO: assert the opened publicatie shows its saved titel/details')
-})
 
 Then('the concept publicatie is not visible on the burgerportaal', async () => {
   // Deterministic proxy: assert the seeded concept never reaches "gepubliceerd" (admin read-back stays concept).

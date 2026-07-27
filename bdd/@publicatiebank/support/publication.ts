@@ -115,6 +115,19 @@ export async function publicationOmschrijvingAdmin(page: Page, titel: string): P
   return page.locator('#id_omschrijving').inputValue()
 }
 
+/**
+ * Officiële titels of the onderwerpen linked to a publicatie, read from the
+ * change page's onderwerpen select2 widget — its backing `<select multiple>`
+ * keeps the selected `<option>`s in the DOM, so no select2 interaction is
+ * needed to read them back. [] if the publicatie is not found.
+ */
+export async function publicationOnderwerpenAdmin(page: Page, titel: string): Promise<string[]> {
+  if (!(await resource.open(page, titel)))
+    return []
+  const titels = await page.locator('#id_onderwerpen option:checked').allTextContents()
+  return titels.map(t => t.trim())
+}
+
 /** Officiële titels of leftover `E2E `-prefixed publicaties via the admin. */
 export function listE2EPublicationTitels(page: Page, prefix = 'E2E '): Promise<string[]> {
   return resource.listE2ENames(page, prefix)
