@@ -1,22 +1,33 @@
 import path from 'node:path'
+import { expectNoSearchResults, searchPublicatieViaUi } from '@/bdd/@burgerportaal/support/search'
 import { publicationOnderwerpenAdmin, publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
+import { waitForWithReload } from './support/hydrate'
 import {
   addDocumentToNewPublicatieViaUi,
   attemptPublishWithOnlyTitelViaUi,
+  bekijkOnlineLink,
+  changeProfielAndRepublishViaUi,
+  clickBekijkOnlineViaUi,
   conceptStatusBanner,
   createAndPublishViaUi,
   DOCUMENT_FIXTURE,
   documentDatumField,
   documentTitelField,
+  editTitelAndRepublishViaUi,
   filterPublicatiesViaUi,
+  ingetrokkenStatusBanner,
+  intrekkenDialog,
+  openMijnPublicaties,
   openPublicatieViaUi,
   saveAsConceptViaUi,
   searchPublicatiesByDateViaUi,
   sortPublicatiesViaUi,
   visiblePublicatieTitels,
   visibleRegistratiedatums,
+  withdrawButton,
   withdrawViaUi,
 } from './support/publicatie-ui'
 
@@ -257,57 +268,66 @@ Then('the publicatie opens with its saved details', async ({ page, publications 
 
 // --- TS6 gaps: creëren van een publicatie ----------------------------------
 
-Then('the concept publicatie is not visible on the burgerportaal', async () => {
-  // Deterministic proxy: assert the seeded concept never reaches "gepubliceerd" (admin read-back stays concept).
-  throw new Error('TODO: assert the concept publicatie is not public (admin status stays concept)')
+Then('the concept publicatie is not visible on the burgerportaal', async ({ page, publications }) => {
+  const titel = publications.last()
+  await searchPublicatieViaUi(page, titel)
+  await expectNoSearchResults(page)
 })
 
 // --- TS7 gaps: wijzigen of intrekken van een publicatie --------------------
 
-When('I open the publicatie from the Mijn publicaties menu', async () => {
-  // Navigate root -> Mijn publicaties -> click the tracked titel (reuse openMijnPublicaties).
-  throw new Error('TODO: open the tracked publicatie from the Mijn publicaties menu (Stagehand act)')
+When('I open the publicatie from the Mijn publicaties menu', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
 })
 
-Then('the publicatie is shown as gepubliceerd before I edit it', async ({ page, publications }) => {
-  // Confirm the published state deterministically before the edit steps run.
-  void page
-  void publications
-  throw new Error('TODO: assert the opened publicatie status is gepubliceerd (admin read-back)')
+Then('the publicatie is shown as gepubliceerd before I edit it', async ({ page }) => {
+  // The "Publicatie intrekken" button only renders for a gepubliceerd publicatie
+  // (see withdrawButton), so its visibility is the SPA's own on-page proof of
+  // the status — checked without leaving the opened page (no admin round-trip).
+  await expect(withdrawButton(page)).toBeVisible()
 })
 
 Given('the signed-in user is authorised for a second gebruikersgroep', async ({ authProfile, scratch }) => {
-  // Seed a second authorised profiel (second authProfile.seed()) so the profiel picker offers a choice.
-  void authProfile
-  void scratch
-  throw new Error('TODO: seed a second authorised gebruikersgroep for the profiel switch')
+  // A second, independent authorised profiel — its own gebruikersgroep, organisatie
+  // and informatiecategorie — so the profiel picker offers a real choice.
+  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed()
+  scratch.set('secondProfielUuid', profielUuid)
+  scratch.set('secondOrganisatieUuid', organisatieUuid)
+  scratch.set('secondInformatiecategorieUuid', informatiecategorieUuid)
 })
 
-When('I change the publicatie profiel to another gebruikersgroep', async () => {
-  // On the opened publicatie, select the other profiel in the top #gebruikersgroep select and re-fill required fields.
-  throw new Error('TODO: switch the publicatie profiel to the second gebruikersgroep (Stagehand act + id/value)')
+When('I change the publicatie profiel to another gebruikersgroep', async ({ page, publications, scratch }) => {
+  // Onderwerpen aren't gated by the profiel, but re-tick the one linked in the
+  // Given step in case the switch clears it (see changeProfielAndRepublishViaUi).
+  await changeProfielAndRepublishViaUi(page, publications.last(), {
+    nieuweProfielUuid: scratch.get('secondProfielUuid')!,
+    organisatieUuid: scratch.get('secondOrganisatieUuid')!,
+    informatiecategorieUuid: scratch.get('secondInformatiecategorieUuid')!,
+    onderwerpTitels: [scratch.get('onderwerpTitel')!],
+  })
 })
 
-Then('the publicatie is owned by the newly chosen gebruikersgroep', async () => {
-  // Read "Eigenaar (groep)" back through the publicatiebank admin and assert it is the second group.
-  throw new Error('TODO: assert the publicatie eigenaar-groep changed to the second gebruikersgroep (admin read-back)')
+Then('the publicatie is owned by the newly chosen gebruikersgroep', async ({ page, publications, scratch }) => {
+  // Reopen and read the persisted "Profiel" value back from the form itself —
+  // the same uuid-as-value convention #titel's own persistence check relies on.
+  await openPublicatieViaUi(page, publications.last())
+  await expect(page.locator('#gebruikersgroep')).toHaveValue(scratch.get('secondProfielUuid')!)
 })
 
-When('I edit the titel of the publicatie and save it', async ({ scratch }) => {
-  // Open the tracked publicatie, replace #titel with a new value (store it in scratch), and save.
-  void scratch
-  throw new Error('TODO: edit the publicatie titel and save (Stagehand act + scratch the new titel)')
+When('I edit the titel of the publicatie and save it', async ({ page, publications }) => {
+  const titel = publications.last()
+  const editedTitel = `${titel}-edited`
+  await editTitelAndRepublishViaUi(page, titel, editedTitel)
+  // Track the renamed titel so cleanup (and `last()` from here on) targets it.
+  publications.track(editedTitel)
 })
 
-When('I reopen the publicatie from my publicaties list', async () => {
-  // Re-navigate to Mijn publicaties and open the (possibly renamed) publicatie again.
-  throw new Error('TODO: reopen the publicatie from Mijn publicaties (Stagehand act)')
+When('I reopen the publicatie from my publicaties list', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
 })
 
-Then('the edited titel of the publicatie has persisted', async ({ scratch }) => {
-  // Assert the reopened form shows the edited titel stored in scratch.
-  void scratch
-  throw new Error('TODO: assert the edited titel persisted after reopening')
+Then('the edited titel of the publicatie has persisted', async ({ page, publications }) => {
+  await expect(page.locator('#titel')).toHaveValue(publications.last())
 })
 
 When('I withdraw a single document on the publicatie and save it', async () => {
@@ -320,34 +340,45 @@ Then('the withdrawn document is still withdrawn', async () => {
   throw new Error('TODO: assert the withdrawn document stays withdrawn after reopening')
 })
 
-When('I click the Bekijk online button on the publicatie', async () => {
-  // Open the published publicatie and click "Bekijk online" (opens the burgerportaal, likely a new tab).
-  throw new Error('TODO: click "Bekijk online" on the published publicatie (Stagehand act + handle popup)')
+When('I click the Bekijk online button on the publicatie', async ({ page, publications, popup }) => {
+  popup.value = await clickBekijkOnlineViaUi(page, publications.last())
 })
 
-Then('the publicatie opens on the burgerportaal', async () => {
-  // Assert a burgerportaal page/tab for the publicatie opened (URL under ENV.apps.burgerportaal).
-  throw new Error('TODO: assert the burgerportaal opened for the publicatie')
+Then('the publicatie opens on the burgerportaal', async ({ publications, popup }) => {
+  const popupPage = popup.value
+  if (!popupPage)
+    throw new Error('"Bekijk online" did not open a popup')
+  const burg = ENV.apps.burgerportaal.replace(/\/$/, '')
+  expect(popupPage.url()).toContain(burg)
+  // The burgerportaal SPA can be slow to hydrate on non-Chromium engines; retry
+  // with a reload rather than an arbitrary wait (see waitForWithReload).
+  const heading = popupPage.getByRole('heading', { name: publications.last(), exact: true })
+  await waitForWithReload(popupPage, heading)
+  await expect(heading).toBeVisible()
 })
 
-When('I withdraw the publicatie and confirm the intrekken dialog', async () => {
-  // Withdraw via the UI and explicitly confirm the "bevestig" dialog (extend withdrawViaUi to assert the dialog appears).
-  throw new Error('TODO: withdraw and confirm the intrekken dialog (Stagehand act)')
+When('I withdraw the publicatie and confirm the intrekken dialog', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
+  await withdrawButton(page).click()
+  // Unlike withdrawViaUi (which confirms only if a dialog happens to appear),
+  // this scenario explicitly verifies the dialog itself before confirming it.
+  await expect(intrekkenDialog(page)).toBeVisible()
+  await intrekkenDialog(page).getByRole('button', { name: 'Ja, intrekken' }).click()
 })
 
-Then('the publicatie is shown as ingetrokken in my publicaties list', async () => {
-  // On Mijn publicaties, assert the row is struck through and carries the "ingetrokken" label.
-  throw new Error('TODO: assert the publicatie shows as ingetrokken (struck through + label) in the list')
+Then('the publicatie is shown as ingetrokken in my publicaties list', async ({ page, publications }) => {
+  await openMijnPublicaties(page)
+  await expect(page.getByText(publications.last(), { exact: true })).toBeVisible()
+  await expect(page.getByText(/ingetrokken/i).first()).toBeVisible()
 })
 
-Then('the opened publicatie shows the ingetrokken message', async () => {
-  // Open the publicatie and assert the banner text "Deze publicatie is ingetrokken." is visible.
-  throw new Error('TODO: assert the "Deze publicatie is ingetrokken." message is shown')
+Then('the opened publicatie shows the ingetrokken message', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
+  await expect(ingetrokkenStatusBanner(page)).toBeVisible()
 })
 
-Then('the Bekijk online button is no longer shown on the publicatie', async () => {
-  // Assert the "Bekijk online" button is absent on a withdrawn publicatie.
-  throw new Error('TODO: assert the "Bekijk online" button is gone after withdrawing')
+Then('the Bekijk online button is no longer shown on the publicatie', async ({ page }) => {
+  await expect(bekijkOnlineLink(page)).toHaveCount(0)
 })
 
 Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ authProfile, adminStagehand, publications, scratch }) => {

@@ -32,7 +32,8 @@ function settle(page: Page): Promise<void> {
   return page.waitForLoadState('networkidle').then(() => {}).catch(() => {})
 }
 
-async function openMijnPublicaties(page: Page) {
+/** Navigate to "Mijn publicaties" from the app root, without any further action. */
+export async function openMijnPublicaties(page: Page) {
   await page.goto(gppApp)
   await settle(page)
   await page.getByRole('link', { name: 'Mijn publicaties' }).click()
@@ -57,6 +58,37 @@ export interface PublicatieInput {
 }
 
 /**
+ * Select `organisatieUuid`'s radio and `informatiecategorieUuid`'s checkbox
+ * (both `.check()` — a no-op if already checked, unlike `.click()`), and, if
+ * `onderwerpTitels` is given, ensure each is ticked too — expanding the
+ * "Onderwerpen" section first only if it isn't already visible. Shared by the
+ * create flow and the profiel-change flow: organisatie/informatiecategorie are
+ * gated by the selected profiel's own autorisaties, so switching profiel
+ * re-scopes (and can clear) all three fields.
+ */
+async function fillWaardelijstFields(page: Page, opts: { organisatieUuid: string, informatiecategorieUuid: string, onderwerpTitels?: string[] }) {
+  await page.locator(`input[type="radio"][value="${opts.organisatieUuid}"]`).check()
+  await page.locator(`input[type="checkbox"][value="${opts.informatiecategorieUuid}"]`).check()
+  for (const onderwerpTitel of opts.onderwerpTitels ?? []) {
+    const checkbox = page.getByRole('checkbox', { name: onderwerpTitel })
+    if (!(await checkbox.isVisible().catch(() => false)))
+      await page.getByText('Onderwerpen', { exact: true }).click()
+    await checkbox.check()
+  }
+}
+
+/**
+ * Click "Publiceren" and confirm the document-less publish ("Publicatie zonder
+ * documenten" -> "Ja, publiceren").
+ */
+async function publishAndConfirmViaUi(page: Page) {
+  await page.getByRole('button', { name: 'Publiceren' }).click()
+  await settle(page)
+  await page.getByRole('button', { name: 'Ja, publiceren' }).click()
+  await settle(page)
+}
+
+/**
  * Create a publicatie under `profiel` and publish it (no documents — this stack
  * has no Documents API). The form itself is a dependent set of custom widgets (a
  * native profiel <select>, then a titel input plus organisatie-radio /
@@ -70,23 +102,11 @@ export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
   await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
   await settle(page)
   // Choosing a profiel reveals the rest of the form (Vue v-if); fill it deterministically.
-  // Each control's value is a uuid; radio/checkbox are toggled with a click.
   await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
   await page.locator('#titel').fill(opts.titel)
-  await page.locator(`input[type="radio"][value="${opts.organisatieUuid}"]`).click()
-  await page.locator(`input[type="checkbox"][value="${opts.informatiecategorieUuid}"]`).click()
-  if (opts.onderwerpTitels?.length) {
-    // The onderwerpen list sits behind its own collapsed section (unlike the
-    // always-rendered organisatie/informatiecategorie groups above).
-    await page.getByText('Onderwerpen', { exact: true }).click()
-    for (const onderwerpTitel of opts.onderwerpTitels)
-      await page.getByRole('checkbox', { name: onderwerpTitel }).check()
-  }
+  await fillWaardelijstFields(page, opts)
   // Publish (the action under test) and confirm the document-less publish.
-  await page.getByRole('button', { name: 'Publiceren' }).click()
-  await settle(page)
-  await page.getByRole('button', { name: 'Ja, publiceren' }).click()
-  await settle(page)
+  await publishAndConfirmViaUi(page)
 }
 
 /**
@@ -163,6 +183,11 @@ export function conceptStatusBanner(page: Page) {
   return page.getByText('Deze publicatie is nog in')
 }
 
+/** The banner shown on an opened publicatie that has been withdrawn (ingetrokken). */
+export function ingetrokkenStatusBanner(page: Page) {
+  return page.getByText('Deze publicatie is ingetrokken')
+}
+
 /**
  * Search "Mijn publicaties" for publicaties registered on `date` (an ISO
  * `YYYY-MM-DD` string), using the "Datum van"/"Datum tot en met" range filter
@@ -228,12 +253,82 @@ export async function filterPublicatiesViaUi(page: Page, opts: { informatiecateg
 }
 
 /**
+ * The "Publicatie intrekken" button on an opened publicatie. Only rendered
+ * while the publicatie is `gepubliceerd` (a concept has nothing to withdraw),
+ * so its visibility doubles as the SPA's own on-page proof of that status.
+ */
+export function withdrawButton(page: Page) {
+  return page.getByRole('button', { name: 'Publicatie intrekken' })
+}
+
+/** The confirmation dialog opened by clicking {@link withdrawButton}. */
+export function intrekkenDialog(page: Page) {
+  return page.getByRole('dialog', { name: /intrekken/i })
+}
+
+/**
+ * Open `titel` from "Mijn publicaties", switch its Profiel to a different
+ * authorised gebruikersgroep, and republish. The new profiel authorises its own
+ * organisatie/informatiecategorie (and onderwerpen aren't gated by the profiel
+ * at all), so {@link fillWaardelijstFields} re-fills all three with the new
+ * profiel's values — a no-op for whichever field(s) the switch didn't clear —
+ * before publishing again.
+ */
+export async function changeProfielAndRepublishViaUi(page: Page, titel: string, opts: {
+  nieuweProfielUuid: string
+  organisatieUuid: string
+  informatiecategorieUuid: string
+  onderwerpTitels?: string[]
+}) {
+  await openPublicatieViaUi(page, titel)
+  await page.locator('#gebruikersgroep').selectOption(opts.nieuweProfielUuid)
+  await settle(page)
+  await fillWaardelijstFields(page, opts)
+  await publishAndConfirmViaUi(page)
+}
+
+/**
+ * Open `titel` from "Mijn publicaties", replace its titel with `newTitel`, and
+ * republish. Unlike a profiel switch (see {@link changeProfielAndRepublishViaUi}),
+ * editing the titel alone doesn't re-scope or clear organisatie/informatiecategorie/
+ * onderwerpen, so they are left untouched.
+ */
+export async function editTitelAndRepublishViaUi(page: Page, titel: string, newTitel: string): Promise<void> {
+  await openPublicatieViaUi(page, titel)
+  await page.locator('#titel').fill(newTitel)
+  await publishAndConfirmViaUi(page)
+}
+
+/**
+ * The "Bekijk online" link on an opened, gepubliceerd publicatie — opens the
+ * burgerportaal detail page for that publicatie in a new tab (a `target="_blank"`
+ * link, hence the "(externe link)" accessible-name suffix).
+ */
+export function bekijkOnlineLink(page: Page) {
+  return page.getByRole('link', { name: 'Bekijk online (externe link)' })
+}
+
+/**
+ * Open `titel` from "Mijn publicaties" and click "Bekijk online", returning the
+ * popup tab it opens (the burgerportaal detail page for that publicatie),
+ * settled and ready to assert against.
+ */
+export async function clickBekijkOnlineViaUi(page: Page, titel: string): Promise<Page> {
+  await openPublicatieViaUi(page, titel)
+  const popupPromise = page.waitForEvent('popup')
+  await bekijkOnlineLink(page).click()
+  const popup = await popupPromise
+  await popup.waitForLoadState('networkidle').catch(() => {})
+  return popup
+}
+
+/**
  * Open a publicatie by titel from "Mijn publicaties" and withdraw it
  * ("Publicatie intrekken"), confirming if prompted.
  */
 export async function withdrawViaUi(page: Page, titel: string) {
   await openPublicatieViaUi(page, titel)
-  await page.getByRole('button', { name: 'Publicatie intrekken' }).click()
+  await withdrawButton(page).click()
   // Confirmation dialog, if any, follows the same "Ja, <verb>" pattern as publish.
   const confirmButton = page.getByRole('button', { name: 'Ja, intrekken' })
   if (await confirmButton.isVisible().catch(() => false))

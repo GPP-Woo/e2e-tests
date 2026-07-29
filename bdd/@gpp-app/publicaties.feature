@@ -92,7 +92,9 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     When I open a publicatie from my publicaties search results
     Then the publicatie opens with its saved details
 
-  @todo
+  # @no-webkit — this scenario searches the burgerportaal SPA, which never
+  # boots past its loading splash in WebKit on this stack (see zoeken.feature).
+  @no-webkit
   Scenario: A concept publicatie is not visible on the burgerportaal
     Given a concept publicatie owned by the signed-in user
     Then the concept publicatie is not visible on the burgerportaal
@@ -106,20 +108,17 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # the "Publicaties van collega's" claim flow. All @todo.
   # ==========================================================================
 
-  @todo
   Scenario: Open a published publicatie from Mijn publicaties before editing
     Given a published publicatie owned by the signed-in user
     When I open the publicatie from the Mijn publicaties menu
     Then the publicatie is shown as gepubliceerd before I edit it
 
-  @todo
   Scenario: Change the profiel (gebruikersgroep) on a publicatie
     Given a published publicatie owned by the signed-in user
     And the signed-in user is authorised for a second gebruikersgroep
     When I change the publicatie profiel to another gebruikersgroep
     Then the publicatie is owned by the newly chosen gebruikersgroep
 
-  @todo
   Scenario: Reopen an edited publicatie and verify the changes persisted
     Given a published publicatie owned by the signed-in user
     When I edit the titel of the publicatie and save it
@@ -133,13 +132,14 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     And I reopen the publicatie from my publicaties list
     Then the withdrawn document is still withdrawn
 
-  @todo
+  # @no-webkit — the popup opens the burgerportaal SPA, which never boots past
+  # its loading splash in WebKit on this stack (see zoeken.feature).
+  @no-webkit
   Scenario: Open a published publicatie on the burgerportaal via "Bekijk online"
     Given a published publicatie owned by the signed-in user
     When I click the Bekijk online button on the publicatie
     Then the publicatie opens on the burgerportaal
 
-  @todo
   Scenario: Withdraw a publicatie through the confirmation dialog
     Given a published publicatie owned by the signed-in user
     When I withdraw the publicatie and confirm the intrekken dialog
@@ -152,3 +152,8 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     Given a published publicatie owned by a colleague in my gebruikersgroep
     When I open a colleague publicatie under the collega publicaties menu and choose a profiel
     Then the current publicatie-eigenaar is shown before I claim it
+
+Testscript 6: Complete 
+Testscript 7: Complete except for two scenarios that have legitimate infrastructure dependencies:
+Document withdrawal persistence.
+Colleague ownership/claim flow.

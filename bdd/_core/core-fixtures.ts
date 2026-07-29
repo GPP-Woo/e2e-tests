@@ -1,4 +1,5 @@
 import type { Stagehand } from '@browserbasehq/stagehand'
+import type { Page } from '@playwright/test'
 import type { AppName, User } from './types'
 import { test as base } from 'playwright-bdd'
 import { stateForTags } from './roles'
@@ -16,6 +17,16 @@ import { DEFAULT_USER, ENV } from './types'
 /** Mutable holder so hooks and steps can agree on who logs in. */
 export interface CurrentUser {
   value?: User
+}
+
+/**
+ * Mutable holder for a popup/new-tab `Page` a step opens (e.g. clicking a
+ * `target="_blank"` link), read back by a later assertion step. `scratch` only
+ * holds strings, so a scenario that needs to pass a `Page` across steps stashes
+ * it here instead.
+ */
+export interface PopupHolder {
+  value?: Page
 }
 
 export interface CoreFixtures {
@@ -39,6 +50,8 @@ export interface CoreFixtures {
   adminStagehand: Stagehand
   /** Generic scenario-scoped key/value scratch shared between a step and its assertion. */
   scratch: Map<string, string>
+  /** Scenario-scoped holder for a popup/new-tab `Page` opened by a step (see {@link PopupHolder}). */
+  popup: PopupHolder
 }
 
 export const coreTest = base.extend<CoreFixtures>({
@@ -89,5 +102,9 @@ export const coreTest = base.extend<CoreFixtures>({
   // eslint-disable-next-line no-empty-pattern
   scratch: async ({}, use) => {
     await use(new Map<string, string>())
+  },
+  // eslint-disable-next-line no-empty-pattern
+  popup: async ({}, use) => {
+    await use({})
   },
 })
