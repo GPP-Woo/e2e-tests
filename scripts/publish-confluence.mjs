@@ -100,12 +100,6 @@ export function storageBody(report, links) {
   ].filter(Boolean).join('\n')
 }
 
-/** Pages serves one site per repo at <owner>.github.io/<repo>/ — derive it. */
-function defaultReportUrl() {
-  const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? '').split('/')
-  return owner && repo ? `https://${owner.toLowerCase()}.github.io/${repo}/` : ''
-}
-
 async function main() {
   const { CONFLUENCE_BASE: base, CONFLUENCE_USER, CONFLUENCE_TOKEN, CONFLUENCE_PAGE_ID: id } = process.env
   for (const [k, v] of Object.entries({ CONFLUENCE_BASE: base, CONFLUENCE_USER, CONFLUENCE_TOKEN, CONFLUENCE_PAGE_ID: id })) {
@@ -127,10 +121,10 @@ async function main() {
 
   const run = process.env.GITHUB_RUN_ID
     && `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
-  const body = storageBody(report, {
-    'CI run': run,
-    'HTML report': process.env.REPORT_URL || defaultReportUrl(),
-  })
+  // No REPORT_URL -> scenario titles render as plain text. Deliberate: guessing
+  // the Pages URL would deep-link every scenario at a 404 (Pages is off on this
+  // repo — private repo on a free org plan), which reads as a broken report.
+  const body = storageBody(report, { 'CI run': run, 'HTML report': process.env.REPORT_URL })
 
   const res = await fetch(url, {
     method: 'PUT',
