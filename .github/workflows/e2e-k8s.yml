@@ -5,6 +5,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# `pages: write` + `id-token: write` are needed by the deploy job below. Fork PRs
+# get a read-only token regardless, but the deploy is gated off for PRs anyway.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A repo has exactly one Pages site, so two runs deploying at once clobber each
+# other. Serialise (don't cancel — a half-finished deploy is worse than a queue).
+concurrency:
+  group: ${{ github.workflow }}-pages
+  cancel-in-progress: false
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -111,8 +124,47 @@ jobs:
           done
           kubectl -n gpp-e2e logs -l app=openzaak --tail=100 || true
 
+      # Zip for PR runs and for anyone who wants the raw report.
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
           path: e2e-tests/playwright-report
+
+      # The HTML report is a self-contained static site: playwright-report/trace/
+      # is the bundled trace viewer and data/*.zip are the traces, so serving the
+      # directory over HTTP gives clickable, fully interactive traces — no upload
+      # to trace.playwright.dev, no `npx playwright show-trace`. (Only over HTTP —
+      # opening index.html from the unzipped artifact via file:// cannot load them.)
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        with:
+          path: e2e-tests/playwright-report/
+
+      # Mirrors the run summary onto a fixed Confluence page. REPORT_URL is the
+      # Pages site (stable URL, always the latest run); the CI-run link in the
+      # summary points at this specific run's zip artifact.
+      # Per-environment page: set CONFLUENCE_PAGE_ID as a GitHub *Environment*
+      # variable once this job takes an `environment:`.
+      - name: Publish summary to Confluence
+        if: ${{ !cancelled() && vars.CONFLUENCE_PAGE_ID != '' }}
+        working-directory: e2e-tests
+        env:
+          CONFLUENCE_BASE: ${{ vars.CONFLUENCE_BASE }}
+          CONFLUENCE_USER: ${{ vars.CONFLUENCE_USER }}
+          CONFLUENCE_TOKEN: ${{ secrets.CONFLUENCE_TOKEN }}
+          CONFLUENCE_PAGE_ID: ${{ vars.CONFLUENCE_PAGE_ID }}
+          REPORT_URL: ${{ vars.REPORT_URL }}
+        run: node scripts/publish-confluence.mjs
+
+  # Separate job: deploy-pages must run in the `github-pages` environment.
+  deploy-report:
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: e2e
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
