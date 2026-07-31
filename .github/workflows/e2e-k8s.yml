@@ -137,7 +137,7 @@ jobs:
       # to trace.playwright.dev, no `npx playwright show-trace`. (Only over HTTP —
       # opening index.html from the unzipped artifact via file:// cannot load them.)
       - uses: actions/upload-pages-artifact@v3
-        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        if: ${{ !cancelled() }}
         with:
           path: e2e-tests/playwright-report/
 
@@ -158,8 +158,12 @@ jobs:
         run: node scripts/publish-confluence.mjs
 
   # Separate job: deploy-pages must run in the `github-pages` environment.
+  # PR runs deploy too. A repo has exactly ONE Pages site and every deploy
+  # replaces it, so the URL always shows the most recent run — PR or not.
+  # Per-PR routes would need a gh-pages branch with pr-<n>/ directories (and a
+  # Pages source switch); at ~112 MB a report that hits the 1 GB site cap fast.
   deploy-report:
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() }}
     needs: e2e
     runs-on: ubuntu-latest
     environment:

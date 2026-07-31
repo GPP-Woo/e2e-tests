@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Publishes a Playwright run summary to a single (fixed) Confluence page.
 // Env: CONFLUENCE_BASE (https://your.atlassian.net), CONFLUENCE_USER (email),
-//      CONFLUENCE_TOKEN (API token), CONFLUENCE_PAGE_ID.
+//      CONFLUENCE_TOKEN (API token), CONFLUENCE_PAGE_ID,
+//      REPORT_URL (optional, defaults to the repo's GitHub Pages site).
 // Usage: node scripts/publish-confluence.mjs playwright-report/results.json
 // Self-check: node scripts/publish-confluence.mjs --selfcheck
 
@@ -10,21 +11,49 @@ import { Buffer } from 'node:buffer'
 import { existsSync, readFileSync } from 'node:fs'
 import process from 'node:process'
 
-const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
-/** Walk the nested suites tree and collect every spec that did not pass. */
-export function failures(report) {
+const ICON = { expected: '✅', unexpected: '⛔', flaky: '⚠️', skipped: '⏭️' }
+// Worst-wins: a scenario that fails in one browser is a failing scenario.
+const RANK = { skipped: 0, expected: 1, flaky: 2, unexpected: 3 }
+
+/**
+ * Flatten the nested suites tree into one row per scenario (a `spec`), with the
+ * status aggregated over its per-browser runs (a `test` per Playwright project).
+ */
+export function scenarios(report) {
   const out = []
   const walk = (suite, path) => {
-    const p = suite.title ? [...path, suite.title] : path
     for (const spec of suite.specs ?? []) {
-      if (!spec.ok)
-        out.push([...p, spec.title].join(' › '))
+      const tests = spec.tests ?? []
+      const status = tests.reduce((worst, t) => RANK[t.status] > RANK[worst] ? t.status : worst, 'skipped')
+      // 3 browsers × ~300 scenarios is unreadable, so only name the browsers
+      // when they disagree — that is the only case where the detail matters.
+      const mixed = tests.some(t => t.status !== status)
+      out.push({
+        file: spec.file,
+        title: [...path, spec.title].join(' › '),
+        id: spec.id,
+        status,
+        note: mixed ? tests.filter(t => t.status === status).map(t => t.projectName).join(', ') : '',
+      })
     }
-    for (const child of suite.suites ?? []) walk(child, p)
+    for (const child of suite.suites ?? []) walk(child, [...path, child.title])
   }
   for (const s of report.suites ?? []) walk(s, [])
   return out
+}
+
+/** Every scenario that did not pass, as a plain `file › suite › scenario` string. */
+export function failures(report) {
+  return scenarios(report).filter(s => s.status === 'unexpected').map(s => `${s.file} › ${s.title}`)
+}
+
+/** Per-scenario deep link into the published Playwright HTML report. */
+function testLink(reportUrl, s) {
+  return reportUrl
+    ? `<a href="${esc(`${reportUrl.replace(/\/$/, '')}/#?testId=${s.id}`)}">${esc(s.title)}</a>`
+    : esc(s.title)
 }
 
 export function storageBody(report, links) {
@@ -44,15 +73,37 @@ export function storageBody(report, links) {
     ['Duration', `${Math.round((s.duration ?? 0) / 1000)}s`],
     ['Started', s.startTime ?? ''],
   ]
-  const failed = failures(report)
+  const all = scenarios(report)
+  const failed = all.filter(x => x.status === 'unexpected')
+  const reportUrl = links['HTML report']
+
+  const byFile = new Map()
+  for (const x of all) byFile.set(x.file, [...(byFile.get(x.file) ?? []), x])
+
   return [
     `<p><strong>${(s.unexpected ?? 0) === 0 ? '✅ PASSED' : '❌ FAILED'}</strong></p>`,
     '<table><tbody>',
     ...rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`),
     '</tbody></table>',
-    failed.length ? `<h2>Failed tests</h2><ul>${failed.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : '',
     ...linkList,
-  ].join('\n')
+    failed.length
+      ? `<h2>Failed scenarios</h2><ul>${failed.map(x => `<li>⛔ ${testLink(reportUrl, x)} <em>${esc(x.file)}</em></li>`).join('')}</ul>`
+      : '',
+    '<h2>All scenarios</h2>',
+    `<p>${esc(`${ICON.expected} passed · ${ICON.unexpected} failed · ${ICON.flaky} flaky · ${ICON.skipped} skipped (@todo or browser-excluded)`)}</p>`,
+    ...[...byFile].flatMap(([file, list]) => [
+      `<h3>${esc(file)}</h3>`,
+      '<table><tbody>',
+      ...list.map(x => `<tr><td>${ICON[x.status]}</td><td>${testLink(reportUrl, x)}</td><td>${esc(x.note)}</td></tr>`),
+      '</tbody></table>',
+    ]),
+  ].filter(Boolean).join('\n')
+}
+
+/** Pages serves one site per repo at <owner>.github.io/<repo>/ — derive it. */
+function defaultReportUrl() {
+  const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? '').split('/')
+  return owner && repo ? `https://${owner.toLowerCase()}.github.io/${repo}/` : ''
 }
 
 async function main() {
@@ -76,7 +127,10 @@ async function main() {
 
   const run = process.env.GITHUB_RUN_ID
     && `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
-  const body = storageBody(report, { 'CI run': run, 'HTML report': process.env.REPORT_URL })
+  const body = storageBody(report, {
+    'CI run': run,
+    'HTML report': process.env.REPORT_URL || defaultReportUrl(),
+  })
 
   const res = await fetch(url, {
     method: 'PUT',
@@ -97,14 +151,30 @@ async function main() {
 if (process.argv[2] === '--selfcheck') {
   const r = {
     stats: { expected: 2, unexpected: 1, flaky: 0, skipped: 0, duration: 12000, startTime: 'T' },
-    suites: [{ title: 'a.feature', specs: [{ title: 'ok', ok: true }], suites: [{ title: 'grp', specs: [{ title: 'b<ad>', ok: false }] }] }],
+    suites: [{
+      title: 'a.feature.spec.js',
+      specs: [{ title: 'top', id: 'idtop', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }] }],
+      suites: [{
+        title: 'Feature: grp',
+        specs: [
+          // fails in webkit only -> worst-wins + the browser gets named
+          { title: 'b<ad>', id: 'idbad', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }, { status: 'unexpected', projectName: 'webkit' }] },
+          { title: 'todo', id: 'idtodo', file: 'a.feature.spec.js', tests: [{ status: 'skipped', projectName: 'chromium' }] },
+        ],
+      }],
+    }],
   }
-  assert.deepEqual(failures(r), ['a.feature › grp › b<ad>'])
-  const html = storageBody(r, { 'CI run': 'http://x' })
+  assert.deepEqual(failures(r), ['a.feature.spec.js › Feature: grp › b<ad>'])
+  assert.deepEqual(scenarios(r).map(s => `${s.status}:${s.note}`), ['expected:', 'unexpected:webkit', 'skipped:'])
+  const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' })
   assert.match(html, /❌ FAILED/)
   assert.match(html, /b&lt;ad&gt;/) // escaped, no raw markup injection
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
+  assert.match(html, /href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad"/) // per-scenario deep link
+  assert.match(html, /⏭️<\/td><td><a[^>]*>Feature: grp › todo</) // skipped scenarios are listed too
   assert.deepEqual(failures({}), [])
+  // no report URL -> plain titles, no dangling links
+  assert.match(storageBody(r, { 'CI run': 'http://x' }), /<td>Feature: grp › todo<\/td>/)
   const none = storageBody(null, { 'CI run': 'http://x', 'HTML report': '' })
   assert.match(none, /NO RESULTS/)
   assert.match(none, /<a href="http:\/\/x">CI run<\/a>/) // links survive the no-report path
