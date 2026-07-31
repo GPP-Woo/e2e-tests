@@ -35,6 +35,8 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.12.0",
+    "@cucumber/gherkin": "^39.1.0",
+    "@cucumber/messages": "^34.2.0",
     "@playwright/test": "^1.52.0",
     "@types/node": "^22.14.1",
     "dotenv": "^16.5.0",

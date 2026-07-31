@@ -8,14 +8,70 @@
 
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import process from 'node:process'
+import { AstBuilder, GherkinClassicTokenMatcher, Parser } from '@cucumber/gherkin'
+import { IdGenerator } from '@cucumber/messages'
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const nl2br = s => esc(s).replace(/\n/g, '<br/>')
 
 const ICON = { expected: '✅', unexpected: '⛔', flaky: '⚠️', skipped: '⏭️' }
+const LABEL = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', skipped: 'skipped' }
 // Worst-wins: a scenario that fails in one browser is a failing scenario.
 const RANK = { skipped: 0, expected: 1, flaky: 2, unexpected: 3 }
+
+const steps = s => [`${s.keyword.trim()}:${s.name ? ` ${s.name}` : ''}`, ...s.steps.map(st => `  ${st.keyword}${st.text}`)]
+
+/**
+ * Index the .feature sources by "<path relative to root>::<scenario name>", so
+ * the report rows can show the Gherkin that was actually run. Background steps
+ * are prepended — they are part of what the scenario asserts.
+ * Returns an empty index when the sources aren't next to the report.
+ */
+export function gherkinIndex(root = 'bdd') {
+  const out = new Map()
+  const files = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory())
+        walk(p)
+      else if (e.name.endsWith('.feature'))
+        files.push(p)
+    }
+  }
+  try {
+    walk(root)
+  }
+  catch {
+    return out
+  }
+  const parser = new Parser(new AstBuilder(IdGenerator.uuid()), new GherkinClassicTokenMatcher())
+  for (const f of files) {
+    const doc = parser.parse(readFileSync(f, 'utf8'))
+    const rel = relative(root, f)
+    const background = []
+    for (const c of doc.feature?.children ?? []) {
+      if (c.background)
+        background.push(...steps(c.background))
+      if (c.scenario)
+        out.set(`${rel}::${c.scenario.name}`, [...background, ...steps(c.scenario)].join('\n'))
+    }
+  }
+  return out
+}
+
+/** `@a/b.feature.spec.js` + scenario title -> the Gherkin source of that scenario. */
+function gherkinFor(index, file, title) {
+  const key = `${file.replace(/\.spec\.js$/, '')}::${title}`
+  if (index.has(key))
+    return index.get(key)
+  // Scenario Outline examples get the parameters appended to the title.
+  const prefix = `${key.split('::')[0]}::`
+  return [...index].find(([k]) => k.startsWith(prefix) && title.startsWith(k.slice(prefix.length)))?.[1] ?? ''
+}
 
 /**
  * Flatten the nested suites tree into one row per scenario (a `spec`), with the
@@ -32,6 +88,7 @@ export function scenarios(report) {
       const mixed = tests.some(t => t.status !== status)
       out.push({
         file: spec.file,
+        scenario: spec.title,
         title: [...path, spec.title].join(' › '),
         id: spec.id,
         status,
@@ -50,13 +107,13 @@ export function failures(report) {
 }
 
 /** Per-scenario deep link into the published Playwright HTML report. */
-function testLink(reportUrl, s) {
+function testLink(reportUrl, s, text) {
   return reportUrl
-    ? `<a href="${esc(`${reportUrl.replace(/\/$/, '')}/#?testId=${s.id}`)}">${esc(s.title)}</a>`
-    : esc(s.title)
+    ? `<a href="${esc(`${reportUrl.replace(/\/$/, '')}/#?testId=${s.id}`)}">${esc(text)}</a>`
+    : esc(text)
 }
 
-export function storageBody(report, links) {
+export function storageBody(report, links, gherkin = new Map()) {
   const linkList = Object.entries(links).filter(([, u]) => u).map(([k, u]) => `<p><a href="${esc(u)}">${esc(k)}</a></p>`)
   // The publish step runs on `!cancelled()`, so it also fires when the job died
   // before Playwright wrote a report (e.g. the stack never came up). Say that,
@@ -80,6 +137,12 @@ export function storageBody(report, links) {
   const byFile = new Map()
   for (const x of all) byFile.set(x.file, [...(byFile.get(x.file) ?? []), x])
 
+  const row = (x) => {
+    const status = `${ICON[x.status]}<br/>${esc(LABEL[x.status])}${x.note ? `<br/>${esc(x.note)}` : ''}`
+    return `<tr><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario))}</td><td>${status}</td>`
+      + `<td>${esc(x.title)}</td><td>${testLink(reportUrl, x, 'report')}</td></tr>`
+  }
+
   return [
     `<p><strong>${(s.unexpected ?? 0) === 0 ? '✅ PASSED' : '❌ FAILED'}</strong></p>`,
     '<table><tbody>',
@@ -87,17 +150,24 @@ export function storageBody(report, links) {
     '</tbody></table>',
     ...linkList,
     failed.length
-      ? `<h2>Failed scenarios</h2><ul>${failed.map(x => `<li>⛔ ${testLink(reportUrl, x)} <em>${esc(x.file)}</em></li>`).join('')}</ul>`
+      ? `<h2>Failed scenarios</h2><ul>${failed.map(x => `<li>⛔ ${testLink(reportUrl, x, x.title)} <em>${esc(x.file)}</em></li>`).join('')}</ul>`
       : '',
     '<h2>All scenarios</h2>',
     `<p>${esc(`${ICON.expected} passed · ${ICON.unexpected} failed · ${ICON.flaky} flaky · ${ICON.skipped} skipped (@todo or browser-excluded)`)}</p>`,
     ...[...byFile].flatMap(([file, list]) => [
       `<h3>${esc(file)}</h3>`,
       '<table><tbody>',
-      ...list.map(x => `<tr><td>${ICON[x.status]}</td><td>${testLink(reportUrl, x)}</td><td>${esc(x.note)}</td></tr>`),
+      '<tr><th>Gherkin</th><th>Status</th><th>Path</th><th>Report</th></tr>',
+      ...list.map(row),
       '</tbody></table>',
     ]),
   ].filter(Boolean).join('\n')
+}
+
+/** Pages serves one site per repo at <owner>.github.io/<repo>/ — derive it. */
+function defaultReportUrl() {
+  const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? '').split('/')
+  return owner && repo ? `https://${owner.toLowerCase()}.github.io/${repo}/` : ''
 }
 
 async function main() {
@@ -121,10 +191,11 @@ async function main() {
 
   const run = process.env.GITHUB_RUN_ID
     && `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
-  // No REPORT_URL -> scenario titles render as plain text. Deliberate: guessing
-  // the Pages URL would deep-link every scenario at a 404 (Pages is off on this
-  // repo — private repo on a free org plan), which reads as a broken report.
-  const body = storageBody(report, { 'CI run': run, 'HTML report': process.env.REPORT_URL })
+  const body = storageBody(
+    report,
+    { 'CI run': run, 'HTML report': process.env.REPORT_URL || defaultReportUrl() },
+    gherkinIndex(),
+  )
 
   const res = await fetch(url, {
     method: 'PUT',
@@ -160,15 +231,26 @@ if (process.argv[2] === '--selfcheck') {
   }
   assert.deepEqual(failures(r), ['a.feature.spec.js › Feature: grp › b<ad>'])
   assert.deepEqual(scenarios(r).map(s => `${s.status}:${s.note}`), ['expected:', 'unexpected:webkit', 'skipped:'])
-  const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' })
+
+  // The real index is built from disk; this repo's own features must parse.
+  const real = gherkinIndex('bdd')
+  assert.ok(real.size > 0, 'bdd/*.feature should parse')
+  const [, sample] = [...real].find(([k]) => k.endsWith('::Welkomsttekst wijzigen'))
+  assert.match(sample, /^Background:\n {2}Given /) // background steps lead
+  assert.match(sample, /Scenario: Welkomsttekst wijzigen\n {2}When /)
+
+  const gk = new Map([['a.feature::b<ad>', 'Scenario: b<ad>\n  Given x']])
+  const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' }, gk)
   assert.match(html, /❌ FAILED/)
-  assert.match(html, /b&lt;ad&gt;/) // escaped, no raw markup injection
+  assert.match(html, /<th>Gherkin<\/th><th>Status<\/th><th>Path<\/th><th>Report<\/th>/)
+  assert.match(html, /<td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/) // gherkin, escaped, newlines kept
+  assert.match(html, /<td>⛔<br\/>failed<br\/>webkit<\/td>/) // icon + state + browser on their own lines
+  assert.match(html, /<td>Feature: grp › b&lt;ad&gt;<\/td>/) // path column
+  assert.match(html, /href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report</) // report column
+  assert.match(html, /<td><\/td><td>⏭️<br\/>skipped<\/td>/) // no gherkin source -> empty cell, row still rendered
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
-  assert.match(html, /href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad"/) // per-scenario deep link
-  assert.match(html, /⏭️<\/td><td><a[^>]*>Feature: grp › todo</) // skipped scenarios are listed too
   assert.deepEqual(failures({}), [])
-  // no report URL -> plain titles, no dangling links
-  assert.match(storageBody(r, { 'CI run': 'http://x' }), /<td>Feature: grp › todo<\/td>/)
+  assert.equal(gherkinIndex('does-not-exist').size, 0) // missing sources must not crash the publish
   const none = storageBody(null, { 'CI run': 'http://x', 'HTML report': '' })
   assert.match(none, /NO RESULTS/)
   assert.match(none, /<a href="http:\/\/x">CI run<\/a>/) // links survive the no-report path
