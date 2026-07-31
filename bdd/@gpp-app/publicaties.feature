@@ -153,7 +153,7 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     When I open a colleague publicatie under the collega publicaties menu and choose a profiel
     Then the current publicatie-eigenaar is shown before I claim it
 
-Testscript 6: Complete 
-Testscript 7: Complete except for two scenarios that have legitimate infrastructure dependencies:
-Document withdrawal persistence.
-Colleague ownership/claim flow.
+# Testscript 6: Complete
+# Testscript 7: Complete except for two scenarios that have legitimate infrastructure dependencies:
+# Document withdrawal persistence.
+# Colleague ownership/claim flow.
