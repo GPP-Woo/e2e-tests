@@ -2,14 +2,14 @@ import { Before, Given, test, Then, When } from '@/bdd/_core/fixture'
 import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 
-// The live Keycloak login redirects to keycloak.woo-search.local, resolvable
-// only in Chromium (the --host-resolver-rules launch arg is Chrome-only). Skip
-// this feature on Firefox/WebKit rather than fail on an unreachable host.
+// Pins a scenario to Chromium. Two reasons occur in this suite: the live
+// Keycloak login redirects to keycloak.woo-search.local, resolvable only in
+// Chromium (the --host-resolver-rules launch arg is Chrome-only); and the
+// publicatiebank @admin features cover one browser on purpose, since the Django
+// admin is server-rendered and a 3-browser sweep buys little for the runtime.
+// Skipped with a reason rather than failing, so the choice stays visible.
 Before({ tags: '@chromium-only' }, async ({ browserName }) => {
-  test.skip(
-    browserName !== 'chromium',
-    `@chromium-only: keycloak.woo-search.local resolves only in Chromium (host-resolver launch arg); ${browserName} cannot reach it.`,
-  )
+  test.skip(browserName !== 'chromium', `@chromium-only: pinned to Chromium; skipped on ${browserName}.`)
 })
 
 Given('I am on the GPP-app', async ({ page }) => {

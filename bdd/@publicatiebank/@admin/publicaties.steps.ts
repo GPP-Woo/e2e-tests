@@ -1,26 +1,57 @@
+import type { Page } from '@playwright/test'
+import { auditEntryCount, newestAuditEntryText } from '@/bdd/@publicatiebank/support/audit-log'
+import { ownerGroupLabel } from '@/bdd/@publicatiebank/support/owner-group'
 import {
+  addConceptPublication,
   addPublishedPublication,
+  deleteOpenPublication,
+  openFirstPublicationResult,
+  openPublicationAdmin,
+  openPublicationChangelist,
   publicationExistsAdmin,
+  publicationFormIsReadOnly,
   publicationOmschrijvingAdmin,
   publicationStatusAdmin,
+  publicationUuidAdmin,
+  savePublicationForm,
+  searchPublicationAdmin,
 } from '@/bdd/@publicatiebank/support/publication'
+import { publicationField } from '@/bdd/@publicatiebank/support/publication-fields'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
 /**
- * Testscript 9 (publicatie beheer) steps. Publicaties are seeded and cleaned up
- * over the admin by the `publications` fixture; the beheer *mutations* run
- * through the Django admin via Stagehand `act()` behind the `pubAdmin` fixture
- * (a ready-built {@link AdminDriver} bound to `adminStagehand`), and assertions
- * read the admin back through the ordinary session-authenticated `page` (stable,
- * unlike the token API while Stagehand drives the same server — see README
- * "Known server flake").
+ * Testscript 9 (publicatie beheer) steps — driven entirely through the ordinary
+ * session-authenticated Playwright `page`.
  *
- * The `@ai` skip guard (no OpenRouter key → skip) and the `adminStagehand`
- * fixture are shared with the organisatie/onderwerp steps (see steps.ts).
+ * This feature deliberately does *not* use the Stagehand `pubAdmin` driver the
+ * other @admin features use. Every mutation here is a Django admin form: a
+ * change-form field, a native `<select>`, a select2 autocomplete, an inline
+ * formset, a changelist bulk action. Those have stable ids, so natural-language
+ * `act()` buys nothing — and it cost a great deal: across the validation runs
+ * every single failure came from Stagehand and none from the admin (act() row
+ * clicks leaving the DOM churning mid-interaction, silently no-op'ed field
+ * edits, "Verwijderen" resolving to the eigenaar-inline link, and the
+ * understudy locator's missing auto-wait). Reads were already deterministic;
+ * now the writes are too.
+ *
+ * Test data is still seeded and cleaned up over the admin by the `publications`
+ * fixture — the token API is unusable here (see README "Known server flake").
  */
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
+// The burgerportaal renders a publicatie from a live API call to the
+// publicatiebank, but it is an SPA behind a proxy — allow a few seconds and a
+// reload, as the burgerportaal scenarios do.
+const LIVE = { timeout: 30_000, intervals: [1000, 2000, 3000] }
+const burg = ENV.apps.burgerportaal.replace(/\/$/, '')
+
+/** Open the change form of the publicatie under test, failing loudly if it is gone. */
+async function openPublication(page: Page, titel: string): Promise<void> {
+  if (!(await openPublicationAdmin(page, titel)))
+    throw new Error(`Publicatie "${titel}" not found in the admin`)
+}
 
 // Prerequisites (deterministic, not the action under test), seeded through the
 // admin add form — the token API is unusable while Stagehand drives the admin.
@@ -28,24 +59,41 @@ Given('a concept publicatie', async ({ publications }) => {
   await publications.seed()
 })
 
+// Publishing enforces a publisher + an informatiecategorie, so a concept that is
+// going to be published by the scenario itself must already carry both — with a
+// bare concept the admin would answer the status change with validation errors.
+Given('a concept publicatie with a publisher and informatiecategorie', async ({ page, publications, organisations }) => {
+  const orgNaam = await organisations.add()
+  const titel = publications.freshName()
+  await addConceptPublication(page, titel, orgNaam)
+  publications.track(titel)
+})
+
 // A gepubliceerd publicatie, seeded deterministically through the admin (needs a
 // publisher organisatie + an informatiecategorie); the withdraw is the mutation
 // under test.
-Given('a published publicatie', async ({ page, publications, organisations }) => {
+Given('a published publicatie', async ({ page, publications, organisations, scratch }) => {
   const orgNaam = await organisations.add()
   const titel = publications.freshName()
   await addPublishedPublication(page, titel, orgNaam)
   publications.track(titel)
+  // Stash the uuid while the publicatie still exists: it is the burgerportaal's
+  // address for it (`/publicaties/<uuid>`), which the Burgerportaal scenarios
+  // still need after the admin has deleted the row.
+  const uuid = await publicationUuidAdmin(page, titel)
+  if (!uuid)
+    throw new Error(`Seeded publicatie "${titel}" has no uuid in the admin changelist`)
+  scratch.set('pub:uuid', uuid)
 })
 
 // --- Edit omschrijving ------------------------------------------------------
 
-When('I change the publicatie omschrijving through the admin', async ({ pubAdmin, publications, scratch }) => {
+When('I change the publicatie omschrijving through the admin', async ({ page, publications, scratch }) => {
   const omschrijving = `E2E gewijzigde omschrijving ${Date.now()}`
   scratch.set('pub:omschrijving', omschrijving)
-  await pubAdmin.open(publications.last())
-  await pubAdmin.act(`Replace the contents of the "Omschrijving" field with: ${omschrijving}`)
-  await pubAdmin.save()
+  await openPublication(page, publications.last())
+  await page.locator('#id_omschrijving').fill(omschrijving)
+  await savePublicationForm(page)
 })
 
 Then('the publicatie has the new omschrijving', async ({ page, publications, scratch }) => {
@@ -56,13 +104,13 @@ Then('the publicatie has the new omschrijving', async ({ page, publications, scr
 
 // --- Rename -----------------------------------------------------------------
 
-When('I rename the publicatie through the admin', async ({ pubAdmin, publications, scratch }) => {
+When('I rename the publicatie through the admin', async ({ page, publications, scratch }) => {
   const oldTitel = publications.last()
   const newTitel = `${publications.freshName()} hernoemd`
   scratch.set('pub:oldTitel', oldTitel)
-  await pubAdmin.open(oldTitel)
-  await pubAdmin.act(`Replace the contents of the "Officiële titel" field with: ${newTitel}`)
-  await pubAdmin.save()
+  await openPublication(page, oldTitel)
+  await page.locator('#id_officiele_titel').fill(newTitel)
+  await savePublicationForm(page)
   // Track the new titel so cleanup deletes the renamed publicatie too.
   publications.track(newTitel)
 })
@@ -76,15 +124,11 @@ Then('the publicatie is known under its new titel and not the old one', async ({
 
 // --- Withdraw (intrekken) ---------------------------------------------------
 
-When('I set the publicatiestatus to {string} and save the publicatie', async ({ pubAdmin, publications }, label: string) => {
-  await pubAdmin.open(publications.last())
-  // The publicatiestatus is a native <select>; set it deterministically (act() on
-  // the status dropdown is the flakiest AI step — see documenten-steps.ts, which
-  // does the same). open() settles the change page first, so the understudy
-  // locator finds the rendered <select>. Option value = lowercased label
-  // (gepubliceerd / ingetrokken / concept). Stagehand still opens + saves.
-  await pubAdmin.page.locator('#id_publicatiestatus').selectOption(label.toLowerCase())
-  await pubAdmin.save()
+When('I set the publicatiestatus to {string} and save the publicatie', async ({ page, publications }, label: string) => {
+  await openPublication(page, publications.last())
+  // Option value = lowercased label (gepubliceerd / ingetrokken / concept).
+  await page.locator('#id_publicatiestatus').selectOption(label.toLowerCase())
+  await savePublicationForm(page)
 })
 
 Then('the publicatie has status {string}', async ({ page, publications }, status: string) => {
@@ -94,9 +138,9 @@ Then('the publicatie has status {string}', async ({ page, publications }, status
 
 // --- Delete -----------------------------------------------------------------
 
-When('I delete the publicatie through the admin', async ({ pubAdmin, publications }) => {
-  await pubAdmin.open(publications.last())
-  await pubAdmin.removeCurrent()
+When('I delete the publicatie through the admin', async ({ page, publications }) => {
+  await openPublication(page, publications.last())
+  await deleteOpenPublication(page)
 })
 
 Then('the publicatie no longer exists', async ({ page, publications }) => {
@@ -106,8 +150,8 @@ Then('the publicatie no longer exists', async ({ page, publications }) => {
 
 // --- Search (UI read under test) --------------------------------------------
 
-When('I search the admin for the publicatie', async ({ pubAdmin, publications }) => {
-  await pubAdmin.search(publications.last())
+When('I search the admin for the publicatie', async ({ page, publications }) => {
+  await searchPublicationAdmin(page, publications.last())
 })
 
 Then('the publicatie is shown in the admin results', async ({ page, publications }) => {
@@ -116,116 +160,122 @@ Then('the publicatie is shown in the admin results', async ({ page, publications
 })
 
 // ===========================================================================
-// @todo gap scenarios (TS9). Skipped by the global Before({tags:'@todo'}) hook
-// until implemented. Each body throws with the intended implementation.
+// Gap scenarios vs. the manual TS9 (matrix rows 174-202).
 // ===========================================================================
 
 // --- Edit remaining metadata fields + persist-after-reopen -----------------
+//
+// One pair of steps for nine widgets: which field is edited, and how, lives in
+// `support/publication-fields.ts`.
 
-When('I change the {string} of the publicatie through the admin', async ({ pubAdmin, publications, scratch }, field: string) => {
-  // Impl: pubAdmin.open(publications.last()); act() a field-specific new value
-  // (select2 for informatiecategorieën/onderwerpen, raw-id for publisher/
-  // verantwoordelijke/eigenaar, date input, plain text for verkorte titel/
-  // kenmerken); stash it in scratch under `pub:field:<field>`; then save().
-  void field
-  void pubAdmin
-  void publications
-  void scratch
-  throw new Error('TODO: edit the given metadata field of publications.last() via pubAdmin and stash the new value in scratch')
-})
+When(
+  'I change the {string} of the publicatie through the admin',
+  async ({ page, publications, categories, organisations, topics, ownerGroups, scratch }, field: string) => {
+    const spec = publicationField(field)
+    // Seeding a prerequisite navigates the shared tab, so it happens first.
+    const value = await spec.prepare({ page, categories, organisations, topics, ownerGroups })
+    scratch.set(`pub:field:${field}`, value)
+    await openPublication(page, publications.last())
+    await spec.apply(page, value)
+    await savePublicationForm(page)
+  },
+)
 
 Then('the {string} persists after reopening the publicatie', async ({ page, publications, scratch }, field: string) => {
-  // Impl: reopen publications.last() through the session `page` and assert the
-  // field-specific read (new support helper e.g. publicationFieldAdmin) equals
-  // the value stashed under `pub:field:<field>` — via expect.poll(..., READ).
-  void field
-  void page
-  void publications
-  void scratch
-  throw new Error('TODO: reopen the publicatie and assert the edited field equals the scratch-stashed value')
+  const spec = publicationField(field)
+  const expected = scratch.get(`pub:field:${field}`)!
+  const titel = publications.last()
+  await expect.poll(async () => {
+    if (!(await openPublicationAdmin(page, titel)))
+      return ''
+    return spec.read(page)
+  }, READ).toContain(expected)
 })
 
 // --- Bulk eigenaar (groep) change (March 2026) -----------------------------
 
-When('I bulk-change the eigenaar groep from the publicatie changelist', async ({ pubAdmin, publications, scratch }) => {
-  // Impl: open the publicatie changelist, tick publications.last()'s row, pick
-  // the "eigenaar (groep) wijzigen" admin bulk action, choose a groep and
-  // confirm; stash the chosen groep under `pub:field:eigenaar (groep)`.
-  void pubAdmin
-  void publications
-  void scratch
-  throw new Error('TODO: run the eigenaar-groep bulk action on the changelist for publications.last()')
+When('I bulk-change the eigenaar groep from the publicatie changelist', async ({ page, publications, ownerGroups, scratch }) => {
+  const identifier = await ownerGroups.add()
+  // The read-back assertion is the shared `"eigenaar (groep)" persists` step, so
+  // stash under the key its field spec uses.
+  scratch.set('pub:field:eigenaar (groep)', identifier)
+  // The action is picked by its option *value* (the admin action's function
+  // name), which — unlike its localised label — cannot drift with a translation.
+  await openPublicationChangelist(page, publications.last())
+  await page.locator('#result_list tbody tr input.action-select').first().check()
+  await page.locator('select[name="action"]').selectOption('change_owner_group')
+  await page.locator('#changelist-form button[name="index"]').click()
+  // The confirmation page offers an existing groep in a plain ModelChoiceField
+  // (labelled `naam - (identifier)`) or a naam to create a new one.
+  await page.locator('#id_eigenaar_groep').selectOption({ label: ownerGroupLabel(identifier) })
+  await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
+  // Let the POST + redirect finish: the assertion step navigates straight away and
+  // would otherwise abort the in-flight submit.
+  await page.waitForLoadState('networkidle').catch(() => {})
 })
 
 // --- Audit logging ---------------------------------------------------------
+//
+// An admin edit is logged as an `update` event carrying a snapshot of every field
+// (`serialize_instance`), so the log entry can be asserted to record *this*
+// change rather than merely that something was logged. See `support/audit-log.ts`.
 
-Then('the audit log shows an edit entry for the publicatie', async ({ page, publications }) => {
-  // Impl: goto /admin/logging/timelinelogproxy (audit logitems), filter q=titel,
-  // assert a row with an "update"/"gewijzigd" action for publications.last().
-  void page
-  void publications
-  throw new Error('TODO: assert the audit logitems list has an update entry for publications.last()')
+Then('the audit log shows an edit entry for the publicatie', async ({ page, publications, scratch }) => {
+  const omschrijving = scratch.get('pub:omschrijving')!
+  await expect.poll(() => newestAuditEntryText(page, publications.last(), 'update'), READ).toContain(omschrijving)
 })
 
 Then('the audit log shows a withdrawal entry for the publicatie', async ({ page, publications }) => {
-  // Impl: same audit logitems list; assert an entry whose change sets
-  // publicatiestatus -> ingetrokken for publications.last().
-  void page
-  void publications
-  throw new Error('TODO: assert the audit logitems list records the withdrawal of publications.last()')
+  // A withdrawal is an update whose snapshot carries the new publicatiestatus.
+  await expect.poll(() => newestAuditEntryText(page, publications.last(), 'update'), READ).toContain('ingetrokken')
 })
 
 Then('the audit log shows a deletion entry for the publicatie', async ({ page, publications }) => {
-  // Impl: same audit logitems list; assert a "delete"/"verwijderd" action entry
-  // for the (now-deleted) publications.last() titel survives after deletion.
-  void page
-  void publications
-  throw new Error('TODO: assert the audit logitems list records the deletion of publications.last()')
+  // The titel survives the deletion in the entry's cached object repr, which is
+  // exactly what the admin search matches on.
+  await expect.poll(() => auditEntryCount(page, publications.last(), 'delete'), READ).toBeGreaterThan(0)
 })
 
 // --- Burgerportaal visibility ----------------------------------------------
+//
+// Addressed by uuid (`/publicaties/<uuid>`), never through the portal search: the
+// woo-search index is not active on this stack, so a search-based check would
+// find nothing either way — and would make the "no longer shows" assertion pass
+// vacuously. The detail page is fetched live from the publicatiebank API.
 
-Then('the Burgerportaal shows the new omschrijving for the publicatie', async ({ page, publications, scratch }) => {
-  // Impl: goto ENV.apps.burgerportaal, search publications.last(), open the
-  // detail page and assert it contains scratch.get('pub:omschrijving').
-  void page
-  void publications
-  void scratch
-  throw new Error('TODO: assert the Burgerportaal detail page shows the edited omschrijving')
+/** Body text of the burgerportaal detail page of the publicatie under test. */
+async function burgerportaalDetailText(page: Page, uuid: string): Promise<string | null> {
+  await page.goto(`${burg}/publicaties/${uuid}`)
+  await page.waitForLoadState('networkidle').catch(() => {})
+  return page.locator('body').textContent()
+}
+
+Then('the Burgerportaal shows the new omschrijving for the publicatie', async ({ page, scratch }) => {
+  const uuid = scratch.get('pub:uuid')!
+  const omschrijving = scratch.get('pub:omschrijving')!
+  await expect.poll(() => burgerportaalDetailText(page, uuid), LIVE).toContain(omschrijving)
 })
 
-Then('the Burgerportaal no longer shows the publicatie', async ({ page, publications }) => {
-  // Impl: goto ENV.apps.burgerportaal, search publications.last() and assert it
-  // returns no results (expect.poll for cache/index lag, per manual F5 tip).
-  void page
-  void publications
-  throw new Error('TODO: assert the Burgerportaal search no longer returns publications.last()')
+Then('the Burgerportaal no longer shows the publicatie', async ({ page, scratch }) => {
+  const uuid = scratch.get('pub:uuid')!
+  // A deleted publicatie 404s on the API, which the portal renders as its
+  // "niet (meer) beschikbaar" alert.
+  await expect.poll(() => burgerportaalDetailText(page, uuid), LIVE).toContain('niet (meer) beschikbaar')
 })
 
 // --- Read-only after withdrawal --------------------------------------------
 
 Then('the publicatie change form is read-only', async ({ page, publications }) => {
-  // Impl: open publications.last() change form; assert the mutable fields
-  // (#id_officiele_titel etc.) are disabled/absent and no _save button shows.
-  void page
-  void publications
-  throw new Error('TODO: assert the withdrawn publicatie change form exposes no editable fields')
+  await expect.poll(() => publicationFormIsReadOnly(page, publications.last()), READ).toBe(true)
 })
 
 // --- Find-then-open flow ---------------------------------------------------
 
-When('I search the admin for the publicatie and open it', async ({ pubAdmin, publications }) => {
-  // Impl: pubAdmin.search(publications.last()) then click the matching result
-  // row link to land on the change form (pubAdmin.open reuses this navigation).
-  void pubAdmin
-  void publications
-  throw new Error('TODO: search the admin for publications.last() and open the matching result')
+When('I search the admin for the publicatie and open it', async ({ page, publications }) => {
+  await searchPublicationAdmin(page, publications.last())
+  await openFirstPublicationResult(page)
 })
 
 Then('the publicatie change form is shown', async ({ page, publications }) => {
-  // Impl: assert the change form for publications.last() is open — the
-  // #id_officiele_titel input value equals the titel.
-  void page
-  void publications
-  throw new Error('TODO: assert the change form for publications.last() is displayed')
+  await expect(page.locator('#id_officiele_titel')).toHaveValue(publications.last())
 })

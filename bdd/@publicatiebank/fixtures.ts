@@ -7,6 +7,7 @@ import { deleteDocumentByTitel } from './support/document'
 import { addSelfAddedCategory, deleteCategoryByName } from './support/information-category'
 import { OdrcClient } from './support/odrc'
 import { addSelfAddedOrganisation, deleteOrganisationByName } from './support/organisation'
+import { addOwnerGroup, deleteOwnerGroupByIdentifier, OWNER_GROUP_PREFIX } from './support/owner-group'
 import { addConceptPublication, deletePublicationByTitel } from './support/publication'
 import { addTopic, deleteTopicByName } from './support/topic'
 
@@ -102,6 +103,19 @@ export interface DocumentManager {
   last: () => string
 }
 
+/**
+ * Owns the eigenaar-groepen (`accounts.OrganisationUnit`) a scenario creates;
+ * deleted again in teardown. Addressed by *identifier* rather than naam — that is
+ * the only field the admin and the publicatie autocomplete search on (see
+ * `support/owner-group.ts`).
+ */
+export interface OwnerGroupManager {
+  /** Create an eigenaar groep (prerequisite); returns its identifier. */
+  add: (identifier?: string) => Promise<string>
+  /** Identifier of the most recently added eigenaar groep (throws if none). */
+  last: () => string
+}
+
 export interface PublicatiebankFixtures {
   /** Test-owned self-added information categories (created + cleaned up). */
   categories: CategoryManager
@@ -109,6 +123,8 @@ export interface PublicatiebankFixtures {
   organisations: OrganisationManager
   /** Test-owned onderwerpen/topics (created + cleaned up via the admin). */
   topics: TopicManager
+  /** Test-owned eigenaar-groepen (created + cleaned up via the admin). */
+  ownerGroups: OwnerGroupManager
   /** Token-authenticated GPP-publicatiebank (ODRC) API client for read verification (TS6-9). */
   odrc: OdrcClient
   /** Test-owned publicaties (seeded + cleaned up via the admin). */
@@ -161,6 +177,19 @@ export const publicatiebankTest = coreTest.extend<PublicatiebankFixtures>({
       emptyMessage: 'No onderwerp created in this scenario',
       create: (name, opts) => addTopic(page, name, opts),
       remove: name => deleteTopicByName(page, name),
+    })
+    await use(manager)
+    await teardown()
+  },
+  ownerGroups: async ({ page }, use, testInfo) => {
+    // The prefix is a slug, not `E2E `: an OrganisationUnit is only searchable by
+    // its identifier, so that is the name this manager hands out and sweeps.
+    const { manager, teardown } = makeResourceManager({
+      workerIndex: testInfo.workerIndex,
+      prefix: OWNER_GROUP_PREFIX,
+      emptyMessage: 'No eigenaar groep created in this scenario',
+      create: identifier => addOwnerGroup(page, identifier),
+      remove: identifier => deleteOwnerGroupByIdentifier(page, identifier),
     })
     await use(manager)
     await teardown()

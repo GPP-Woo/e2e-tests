@@ -3,6 +3,7 @@ import { deleteUsergroupByName, listE2EUsergroupNames } from '@/bdd/@gpp-app/sup
 import { deleteDocumentByTitel, listE2EDocumentTitels } from '@/bdd/@publicatiebank/support/document'
 import { deleteCategoryByName, listE2ECategoryNames } from '@/bdd/@publicatiebank/support/information-category'
 import { deleteOrganisationByName, listE2EOrganisationNames } from '@/bdd/@publicatiebank/support/organisation'
+import { deleteOwnerGroupByIdentifier, listE2EOwnerGroupIdentifiers } from '@/bdd/@publicatiebank/support/owner-group'
 import { deletePublicationByTitel, listE2EPublicationTitels } from '@/bdd/@publicatiebank/support/publication'
 import { deleteTopicByName, listE2ETopicNames } from '@/bdd/@publicatiebank/support/topic'
 import { adminState } from '@/bdd/_core/roles'
@@ -30,6 +31,8 @@ const ADMIN_SWEEPS: AdminSweep[] = sortByDependsOn([
   { label: 'documenten', list: listE2EDocumentTitels, remove: deleteDocumentByTitel },
   // A document belongs to a publicatie, so documenten must be swept first.
   { label: 'publicaties', dependsOn: ['documenten'], list: listE2EPublicationTitels, remove: deletePublicationByTitel },
+  // `Publication.eigenaar_groep` is SET_NULL, so a groep can go at any point.
+  { label: 'eigenaar-groepen', list: listE2EOwnerGroupIdentifiers, remove: deleteOwnerGroupByIdentifier },
 ])
 
 /**
