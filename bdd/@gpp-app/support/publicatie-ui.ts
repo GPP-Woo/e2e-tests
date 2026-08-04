@@ -78,10 +78,40 @@ async function fillWaardelijstFields(page: Page, opts: { organisatieUuid: string
 }
 
 /**
- * Click "Publiceren" and confirm the document-less publish ("Publicatie zonder
- * documenten" -> "Ja, publiceren").
+ * The `value` attribute of every currently selectable organisatie (radio) or
+ * informatiecategorie (checkbox) option on the "Nieuwe publicatie" form —
+ * both option-groups carry the waardelijst uuid as their `value` (see
+ * {@link fillWaardelijstFields}), so this is how a profiel's autorisaties
+ * are read back deterministically. Onderwerp checkboxes are not gated by the
+ * profiel and are not carrying a uuid `value` in the first place, and (unlike
+ * organisatie/informatiecategorie) stay hidden until their "Onderwerpen"
+ * section is expanded — so as long as that section is left collapsed, the
+ * `:visible` checkboxes on the page are exactly the informatiecategorie ones.
  */
-async function publishAndConfirmViaUi(page: Page) {
+async function selectableWaardelijstValues(page: Page, inputType: 'radio' | 'checkbox'): Promise<string[]> {
+  return page.locator(`input[type="${inputType}"]:visible`).evaluateAll(
+    inputs => inputs.map(input => (input as HTMLInputElement).value),
+  )
+}
+
+/** The `value`s of the organisatie options the "Nieuwe publicatie" form currently offers. */
+export function selectableOrganisatieUuids(page: Page): Promise<string[]> {
+  return selectableWaardelijstValues(page, 'radio')
+}
+
+/** The `value`s of the informatiecategorie options the "Nieuwe publicatie" form currently offers. */
+export function selectableInformatiecategorieUuids(page: Page): Promise<string[]> {
+  return selectableWaardelijstValues(page, 'checkbox')
+}
+
+/**
+ * Click "Publiceren" and confirm the document-less publish ("Publicatie zonder
+ * documenten" -> "Ja, publiceren"). Shared by the create/edit flows below and by
+ * any scenario that needs to attempt a (re)publish without assuming it
+ * succeeds — e.g. one that expects the server to reject it because the
+ * publicatie's organisatie/informatiecategorie is no longer authorised.
+ */
+export async function publishAndConfirmViaUi(page: Page) {
   await page.getByRole('button', { name: 'Publiceren' }).click()
   await settle(page)
   await page.getByRole('button', { name: 'Ja, publiceren' }).click()
@@ -107,6 +137,21 @@ export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
   await fillWaardelijstFields(page, opts)
   // Publish (the action under test) and confirm the document-less publish.
   await publishAndConfirmViaUi(page)
+}
+
+/**
+ * Open "Nieuwe publicatie" and select `profielUuid`, without filling in
+ * anything else. For scenarios that only need to inspect what the chosen
+ * profiel's form renders — e.g. which organisatie/informatiecategorie values
+ * it authorises (see {@link selectableOrganisatieUuids} /
+ * {@link selectableInformatiecategorieUuids}) — rather than create a publicatie.
+ */
+export async function openNieuwePublicatieAndSelectProfielViaUi(page: Page, profielUuid: string) {
+  await openMijnPublicaties(page)
+  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
+  await settle(page)
+  await page.locator('#gebruikersgroep').selectOption(profielUuid)
+  await settle(page)
 }
 
 /**

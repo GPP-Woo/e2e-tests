@@ -1,18 +1,18 @@
-import type { Stagehand } from '@browserbasehq/stagehand'
-import { settle, stagehandPage } from '@/bdd/_core/stagehand'
+import type { Page } from '@playwright/test'
+import { adminState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
-import { expect } from '@playwright/test'
+import { request as apiRequest, expect } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
+import { createAndPublishViaUi, openNieuwePublicatieAndSelectProfielViaUi, openPublicatieViaUi, publishAndConfirmViaUi, selectableInformatiecategorieUuids, selectableOrganisatieUuids } from './support/publicatie-ui'
+import { resolveOrganisatieUuid } from './support/usergroup'
 
 /**
- * Testscript 5 (gebruikersgroepen) steps. Mutations run through the gpp-app UI
- * via Stagehand `act()` on the `adminStagehand` browser (its adminState cookies
- * authenticate the gpp-app — the admin account is the AD-beheerder). Verification
- * and cleanup use the odpc JSON API through the `usergroups` fixture — the token
- * API on the publicatiebank is not involved here.
- *
- * The `@ai` skip guard (no OpenRouter key → skip) is shared with the other
- * Stagehand features (see @publicatiebank/@admin/steps.ts).
+ * Testscript 5 (gebruikersgroepen) steps. Every UI mutation runs through the
+ * ordinary session-authenticated Playwright `page` — no Stagehand, no AI model
+ * in the loop. The feature's `@admin` tag selects the admin storage state (see
+ * `_core/roles.ts`); its cookies also authenticate the gpp-app. Verification
+ * and cleanup use the odpc JSON API through the `usergroups` fixture — the
+ * token API on the publicatiebank is not involved here.
  */
 
 const gppApp = ENV.apps.gppApp.replace(/\/$/, '')
@@ -21,35 +21,30 @@ const READ = { timeout: 15_000, intervals: [500, 1000, 2000] }
 // The gpp-app is a SPA that only hydrates its routes when navigated via clicks
 // from the app root — deep-linking a route (e.g. /gebruikersgroepen/nieuw) leaves
 // the form unrendered. So every flow starts at the root and clicks through.
-async function openGebruikersgroepen(stagehand: Stagehand) {
-  const page = stagehandPage(stagehand)
+async function openGebruikersgroepen(page: Page) {
   await page.goto(gppApp)
-  await settle(page)
-  await stagehand.act('Click "Gebruikersgroepen" in the top navigation')
-  await settle(page)
+  await page.getByRole('link', { name: 'Gebruikersgroepen' }).click()
 }
 
-/** Create a gebruikersgroep with just a naam through the gpp-app UI (Stagehand). */
-async function createGroupViaUi(stagehand: Stagehand, naam: string) {
-  await openGebruikersgroepen(stagehand)
-  await stagehand.act('Click the "Nieuwe gebruikersgroep" button')
-  await stagehand.act(`Fill the "Naam" field with: ${naam}`)
-  await stagehand.act('Click the "Opslaan" button to save the gebruikersgroep')
-  await settle(stagehandPage(stagehand))
+/** Create a gebruikersgroep with just a naam through the gpp-app UI. */
+async function createGroupViaUi(page: Page, naam: string) {
+  await openGebruikersgroepen(page)
+  await page.getByRole('link', { name: 'Nieuwe gebruikersgroep' }).click()
+  await page.getByRole('textbox', { name: 'Naam *' }).fill(naam)
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 }
 
-/** Open a gebruikersgroep by naam from the overview (Stagehand). */
-async function openGroup(stagehand: Stagehand, naam: string) {
-  await openGebruikersgroepen(stagehand)
-  await stagehand.act(`Open the gebruikersgroep named "${naam}" by clicking it`)
-  await settle(stagehandPage(stagehand))
+/** Open a gebruikersgroep by naam from the overview. */
+async function openGroup(page: Page, naam: string) {
+  await openGebruikersgroepen(page)
+  await page.getByRole('link', { name: naam, exact: true }).click()
 }
 
 // --- Create -----------------------------------------------------------------
 
-When('I create a gebruikersgroep through the gpp-app', async ({ adminStagehand, usergroups }) => {
+When('I create a gebruikersgroep through the gpp-app', async ({ page, usergroups }) => {
   const naam = usergroups.freshName()
-  await createGroupViaUi(adminStagehand, naam)
+  await createGroupViaUi(page, naam)
   usergroups.track(naam)
 })
 
@@ -60,9 +55,9 @@ Then('the gebruikersgroep exists', async ({ usergroups }) => {
 
 // --- Prerequisite -----------------------------------------------------------
 
-Given('a gebruikersgroep', async ({ adminStagehand, usergroups }) => {
+Given('a gebruikersgroep', async ({ page, usergroups }) => {
   const naam = usergroups.freshName()
-  await createGroupViaUi(adminStagehand, naam)
+  await createGroupViaUi(page, naam)
   usergroups.track(naam)
   // Make sure it actually landed before the scenario mutates it.
   await expect.poll(() => usergroups.exists(naam), READ).toBe(true)
@@ -70,14 +65,13 @@ Given('a gebruikersgroep', async ({ adminStagehand, usergroups }) => {
 
 // --- Rename -----------------------------------------------------------------
 
-When('I rename the gebruikersgroep through the gpp-app', async ({ adminStagehand, usergroups, scratch }) => {
+When('I rename the gebruikersgroep through the gpp-app', async ({ page, usergroups, scratch }) => {
   const oldName = usergroups.last()
   const newName = `${usergroups.freshName()} hernoemd`
   scratch.set('groep:oldName', oldName)
-  await openGroup(adminStagehand, oldName)
-  await adminStagehand.act(`Replace the contents of the "Naam" field with: ${newName}`)
-  await adminStagehand.act('Click the "Opslaan" button to save the gebruikersgroep')
-  await settle(stagehandPage(adminStagehand))
+  await openGroup(page, oldName)
+  await page.getByRole('textbox', { name: 'Naam *' }).fill(newName)
+  await page.getByRole('button', { name: 'Opslaan' }).click()
   usergroups.track(newName)
 })
 
@@ -90,12 +84,11 @@ Then('the gebruikersgroep is known under its new name and not the old one', asyn
 
 // --- Delete -----------------------------------------------------------------
 
-When('I delete the gebruikersgroep through the gpp-app', async ({ adminStagehand, usergroups }) => {
+When('I delete the gebruikersgroep through the gpp-app', async ({ page, usergroups }) => {
   const naam = usergroups.last()
-  await openGroup(adminStagehand, naam)
-  await adminStagehand.act('Click the "Verwijderen" button to delete this gebruikersgroep')
-  await adminStagehand.act('Confirm the deletion by clicking the "Ja, verwijderen" button')
-  await settle(stagehandPage(adminStagehand))
+  await openGroup(page, naam)
+  await page.getByRole('button', { name: 'Verwijderen' }).click()
+  await page.getByRole('button', { name: 'Ja' }).click()
 })
 
 Then('the gebruikersgroep no longer exists', async ({ usergroups }) => {
@@ -103,116 +96,197 @@ Then('the gebruikersgroep no longer exists', async ({ usergroups }) => {
   await expect.poll(() => usergroups.exists(naam), READ).toBe(false)
 })
 
-// --- @todo: gap-coverage stubs (TS5 steps 4b-4g, 5, 6a-6i) ------------------
-// Skipped by the global Before({tags:'@todo'}) hook in _core/todo.steps.ts.
-
 // --- Create with omschrijving + gebruiker + autorisaties (4b-4g) ------------
 
-When('I create a gebruikersgroep with a naam and omschrijving through the gpp-app', async () => {
-  // Like createGroupViaUi but also act() on the "Omschrijving" textarea; track the naam.
-  throw new Error('TODO: open Gebruikersgroepen, Nieuwe gebruikersgroep, fill Naam + Omschrijving, usergroups.track(naam)')
+// The form stays open across this whole chain of steps (naam+omschrijving ->
+// gebruiker -> autorisaties -> save), so every step below acts on the same
+// "Nieuwe gebruikersgroep" page the first step navigates to.
+
+When('I create a gebruikersgroep with a naam and omschrijving through the gpp-app', async ({ page, usergroups, scratch }) => {
+  const naam = usergroups.freshName()
+  const omschrijving = `E2E omschrijving ${Date.now()}`
+  scratch.set('groep:omschrijving', omschrijving)
+  await openGebruikersgroepen(page)
+  await page.getByRole('link', { name: 'Nieuwe gebruikersgroep' }).click()
+  await page.getByRole('textbox', { name: 'Naam *' }).fill(naam)
+  await page.getByRole('textbox', { name: 'Omschrijving' }).fill(omschrijving)
+  usergroups.track(naam)
 })
 
-When('I add myself as a gebruiker to the gebruikersgroep', async () => {
-  // On the open group form, act() to add the signed-in user by e-mail (currentUserId / /api/me email).
-  throw new Error('TODO: act("Add myself as a gebruiker by e-mail to this gebruikersgroep")')
+When('I add myself as a gebruiker to the gebruikersgroep', async ({ page }) => {
+  // The signed-in identity is the admin user (the feature's @admin tag), same
+  // one the ENV config uses to sign in — not read back from the API, since the
+  // UI adds a gebruiker by e-mail rather than by id.
+  await page.getByRole('textbox', { name: 'Gebruiker toevoegen ?' }).fill(ENV.users.admin.email)
+  await page.getByRole('button', { name: 'Toevoegen' }).click()
+  await page.getByText('Toegevoegde gebruikers').click()
 })
 
-When('I authorise the gebruikersgroep for one or more organisaties', async () => {
-  // Expand the "Organisatie" panel and tick a few actieve organisaties.
-  throw new Error('TODO: act("Expand Organisatie and tick one or more organisaties")')
+When('I authorise the gebruikersgroep for one or more organisaties', async ({ page }) => {
+  await page.getByText('Organisatie', { exact: true }).click()
+  await page.getByRole('checkbox', { name: '@testorganisatie' }).check()
+  await page.getByRole('checkbox', { name: 'Oost Gelre', exact: true }).check()
 })
 
-When('I authorise the gebruikersgroep for one or more informatiecategorieën', async () => {
-  // Expand the "Informatiecategorie" panel and tick a few categorieën.
-  throw new Error('TODO: act("Expand Informatiecategorie and tick one or more informatiecategorieën")')
+When('I authorise the gebruikersgroep for one or more informatiecategorieën', async ({ page }) => {
+  await page.getByText('Informatiecategorie').click()
+  await page.getByRole('checkbox', { name: 'advies', exact: true }).check()
+  await page.getByRole('checkbox', { name: 'convenant', exact: true }).check()
 })
 
-When('I authorise the gebruikersgroep for one or more onderwerpen', async () => {
-  // Expand the "onderwerpen" panel and tick a few onderwerpen.
-  throw new Error('TODO: act("Expand onderwerpen and tick one or more onderwerpen")')
+When('I authorise the gebruikersgroep for one or more onderwerpen', async ({ page }) => {
+  await page.getByText('Onderwerp').click()
+  await page.getByRole('checkbox', { name: 'Aanleg stadspark' }).check()
+  await page.getByRole('checkbox', { name: 'Samen Duurzaam Vooruit' }).check()
 })
 
-When('I save the gebruikersgroep', async () => {
-  // Click "Opslaan" and settle().
-  throw new Error('TODO: act("Click the Opslaan button") then settle()')
+When('I save the gebruikersgroep', async ({ page }) => {
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
-Then('the gebruikersgroep has the entered omschrijving, gebruiker and autorisaties', async () => {
-  // Read the group back over the odpc API (/api/gebruikersgroepen/{uuid}) and assert
-  // omschrijving, gekoppeldeGebruikers and gekoppeldeWaardelijsten are non-empty/as entered.
-  throw new Error('TODO: GET the tracked group by uuid and assert omschrijving + gebruiker + gekoppeldeWaardelijsten')
+Then('the gebruikersgroep has the entered omschrijving, gebruiker and autorisaties', async ({ usergroups, scratch }) => {
+  const naam = usergroups.last()
+  const omschrijving = scratch.get('groep:omschrijving')!
+  await expect.poll(async () => (await usergroups.detail(naam)).omschrijving, READ).toBe(omschrijving)
+  const detail = await usergroups.detail(naam)
+  expect(detail.gekoppeldeGebruikers.length).toBeGreaterThan(0)
+  expect(detail.gekoppeldeWaardelijsten.length).toBeGreaterThanOrEqual(3)
 })
 
 // --- Autorisaties constrain the publicatie flow (step 5) --------------------
 
-Given('a gebruikersgroep authorised for one organisatie and one informatiecategorie', async () => {
-  // Seed deterministically via the authProfile fixture (seed() -> {profielUuid, organisatieUuid, informatiecategorieUuid}); stash uuids in scratch.
-  throw new Error('TODO: authProfile.seed() and scratch.set the returned uuids for later assertions')
+Given('a gebruikersgroep authorised for one organisatie and one informatiecategorie', async ({ authProfile, scratch }) => {
+  const { profielUuid, naam, organisatieUuid, informatiecategorieUuid } = await authProfile.seed()
+  scratch.set('profielUuid', profielUuid)
+  scratch.set('groep:naam', naam)
+  scratch.set('organisatieUuid', organisatieUuid)
+  scratch.set('informatiecategorieUuid', informatiecategorieUuid)
 })
 
-When('I start a nieuwe publicatie in the gpp-app', async () => {
-  // Navigate Publicaties -> Nieuwe publicatie via Stagehand, picking the seeded profiel if prompted.
-  throw new Error('TODO: act through Publicaties > Nieuwe publicatie, choose the seeded gebruikersgroep as profiel')
+When('I start a nieuwe publicatie in the gpp-app', async ({ page, scratch }) => {
+  await openNieuwePublicatieAndSelectProfielViaUi(page, scratch.get('profielUuid')!)
 })
 
-Then('I can only select the organisatie and informatiecategorie the gebruikersgroep is authorised for', async () => {
-  // Assert the Organisatie/Informatiecategorie selects only expose the seeded uuids as options.
-  throw new Error('TODO: assert the publicatie-form option values equal the seeded organisatie/informatiecategorie uuids')
+Then('I can only select the organisatie and informatiecategorie the gebruikersgroep is authorised for', async ({ page, scratch }) => {
+  const organisatieUuid = scratch.get('organisatieUuid')!
+  const informatiecategorieUuid = scratch.get('informatiecategorieUuid')!
+  expect(await selectableOrganisatieUuids(page)).toEqual([organisatieUuid])
+  expect(await selectableInformatiecategorieUuids(page)).toEqual([informatiecategorieUuid])
 })
 
 // --- Edit omschrijving + add another gebruiker (6a-6d) ----------------------
 
-When('I change the gebruikersgroep omschrijving through the gpp-app', async () => {
-  // openGroup(last()) then act() to replace the "Omschrijving" textarea; stash new text in scratch.
-  throw new Error('TODO: open the tracked group, replace Omschrijving, save, scratch.set the new omschrijving')
+When('I change the gebruikersgroep omschrijving through the gpp-app', async ({ page, usergroups, scratch }) => {
+  const naam = usergroups.last()
+  const omschrijving = `E2E gewijzigde omschrijving ${Date.now()}`
+  scratch.set('groep:omschrijving', omschrijving)
+  await openGroup(page, naam)
+  await page.getByRole('textbox', { name: 'Omschrijving' }).fill(omschrijving)
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
-When('I add another gebruiker to the gebruikersgroep through the gpp-app', async () => {
-  // On the open group form, act() to add a second (different) gebruiker by e-mail.
-  throw new Error('TODO: act("Add another gebruiker by e-mail") and save')
+When('I add another gebruiker to the gebruikersgroep through the gpp-app', async ({ page, usergroups }) => {
+  // "Another" gebruiker than the signed-in admin — the regular user is a
+  // distinct, already-configured identity, not a made-up e-mail.
+  const secondUserEmail = ENV.users.regular.email
+  await openGroup(page, usergroups.last())
+  await page.getByRole('textbox', { name: 'Gebruiker toevoegen ?' }).fill(secondUserEmail)
+  await page.getByRole('button', { name: 'Toevoegen' }).click()
+  await page.getByText('Toegevoegde gebruikers').click()
+  // Confirm the row actually landed before saving.
+  await expect(page.getByRole('cell', { name: secondUserEmail, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
-Then('the gebruikersgroep has the changed omschrijving and the added gebruiker', async () => {
-  // Read the group back over the odpc API and assert omschrijving matches scratch and gekoppeldeGebruikers grew.
-  throw new Error('TODO: GET the group by uuid; assert omschrijving === scratch value and >=2 gekoppeldeGebruikers')
+Then('the gebruikersgroep has the changed omschrijving and the added gebruiker', async ({ usergroups, scratch }) => {
+  const naam = usergroups.last()
+  const omschrijving = scratch.get('groep:omschrijving')!
+  await expect.poll(async () => (await usergroups.detail(naam)).omschrijving, READ).toBe(omschrijving)
+  const detail = await usergroups.detail(naam)
+  expect(detail.gekoppeldeGebruikers.length).toBeGreaterThanOrEqual(1)
 })
 
 // --- Modify autorisaties + verify change (6e-6h) ----------------------------
+// The seeded organisatie/informatiecategorie uuids (see the Given above) let the
+// old organisatie's checkbox be unticked by `value` — no display naam needed —
+// mirroring how support/publicatie-ui.ts targets these same waardelijst inputs.
 
-When('I change the gebruikersgroep autorisaties through the gpp-app', async () => {
-  // Open the seeded group, untick some org/categorie/onderwerp vinkjes and tick others; save.
-  throw new Error('TODO: open the seeded group, toggle organisatie/informatiecategorie/onderwerp checkboxes, save')
+When('I change the gebruikersgroep autorisaties through the gpp-app', async ({ page, organisations, scratch }) => {
+  const naam = scratch.get('groep:naam')!
+  const oldOrganisatieUuid = scratch.get('organisatieUuid')!
+
+  // A fresh, self-added organisatie to switch to — deterministic, not a hardcoded uuid.
+  const ctx = await apiRequest.newContext({ storageState: adminState })
+  let newOrganisatieUuid: string
+  try {
+    const newOrganisatieNaam = await organisations.add()
+    newOrganisatieUuid = await resolveOrganisatieUuid(ctx, newOrganisatieNaam)
+  }
+  finally {
+    await ctx.dispose()
+  }
+  scratch.set('groep:newOrganisatieUuid', newOrganisatieUuid)
+
+  await openGroup(page, naam)
+  await page.getByText('Organisatie', { exact: true }).click()
+  await page.locator(`input[type="checkbox"][value="${oldOrganisatieUuid}"]`).uncheck()
+  await page.locator(`input[type="checkbox"][value="${newOrganisatieUuid}"]`).check()
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
-Then('the gebruikersgroep reflects the changed autorisaties', async () => {
-  // Read the group back over the odpc API and assert gekoppeldeWaardelijsten differs from the seeded set.
-  throw new Error('TODO: GET the group by uuid; assert gekoppeldeWaardelijsten changed from the seeded uuids')
+Then('the gebruikersgroep reflects the changed autorisaties', async ({ usergroups, scratch }) => {
+  const naam = scratch.get('groep:naam')!
+  const oldOrganisatieUuid = scratch.get('organisatieUuid')!
+  const newOrganisatieUuid = scratch.get('groep:newOrganisatieUuid')!
+  await expect.poll(async () => (await usergroups.detail(naam)).gekoppeldeWaardelijsten, READ)
+    .toEqual(expect.arrayContaining([newOrganisatieUuid]))
+  const { gekoppeldeWaardelijsten } = await usergroups.detail(naam)
+  expect(gekoppeldeWaardelijsten).not.toContain(oldOrganisatieUuid)
 })
 
-Then('a nieuwe publicatie only offers the changed authorised waardelijsten', async () => {
-  // Re-run the nieuwe-publicatie flow and assert the offered options match the *new* autorisaties.
-  throw new Error('TODO: start Nieuwe publicatie and assert option values equal the changed waardelijst uuids')
+Then('a nieuwe publicatie only offers the changed authorised waardelijsten', async ({ page, scratch }) => {
+  const profielUuid = scratch.get('profielUuid')!
+  const newOrganisatieUuid = scratch.get('groep:newOrganisatieUuid')!
+  const informatiecategorieUuid = scratch.get('informatiecategorieUuid')!
+  await openNieuwePublicatieAndSelectProfielViaUi(page, profielUuid)
+  expect(await selectableOrganisatieUuids(page)).toEqual([newOrganisatieUuid])
+  expect(await selectableInformatiecategorieUuids(page)).toEqual([informatiecategorieUuid])
 })
 
 // --- Existing publicatie no longer authorised (6i) --------------------------
 
-Given('an existing publicatie made under that gebruikersgroep', async () => {
-  // Create a publicatie via the API under the seeded profiel (reuse publicatiebank fixtures); track it.
-  throw new Error('TODO: create a publicatie under the seeded profiel/organisatie/informatiecategorie and track it')
+Given('an existing publicatie made under that gebruikersgroep', async ({ page, publications, scratch }) => {
+  const titel = publications.freshName()
+  await createAndPublishViaUi(page, {
+    profielUuid: scratch.get('profielUuid')!,
+    organisatieUuid: scratch.get('organisatieUuid')!,
+    informatiecategorieUuid: scratch.get('informatiecategorieUuid')!,
+    titel,
+  })
+  publications.track(titel)
 })
 
-When('I remove the informatiecategorie autorisatie from the gebruikersgroep through the gpp-app', async () => {
-  // Open the seeded group and untick the informatiecategorie the publicatie uses; save.
-  throw new Error('TODO: open the seeded group, untick its informatiecategorie vinkje, save')
+When('I remove the informatiecategorie autorisatie from the gebruikersgroep through the gpp-app', async ({ page, scratch }) => {
+  const naam = scratch.get('groep:naam')!
+  const informatiecategorieUuid = scratch.get('informatiecategorieUuid')!
+  await openGroup(page, naam)
+  await page.getByText('Informatiecategorie').click()
+  await page.locator(`input[type="checkbox"][value="${informatiecategorieUuid}"]`).uncheck()
+  await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
-When('I open the existing publicatie for editing in the gpp-app', async () => {
-  // Navigate Publicaties -> open the tracked publicatie for editing via Stagehand.
-  throw new Error('TODO: act through Publicaties and open the tracked publicatie for editing')
+When('I open the existing publicatie for editing in the gpp-app', async ({ page, publications }) => {
+  await openPublicatieViaUi(page, publications.last())
+  // Editing a gepubliceerd publicatie in this app means re-publishing it (see
+  // editTitelAndRepublishViaUi/changeProfielAndRepublishViaUi in publicatie-ui.ts)
+  // — attempting that republish is what surfaces the now-unauthorised-
+  // informatiecategorie error, so the attempt itself belongs in this step.
+  await publishAndConfirmViaUi(page)
 })
 
-Then('I see an error telling me to contact the beheerder', async () => {
-  // Assert the form shows the "neem contact op met de beheerder" foutmelding.
-  throw new Error('TODO: expect the publicatie form to show the contact-de-beheerder error message')
+Then('I see an error telling me to contact the beheerder', async ({ page }) => {
+  // Observed message: "De publicatie kon niet worden ... Probeer het nogmaals
+  // of neem contact op met de beheerder." — anchored on the trailing,
+  // unambiguous phrase rather than the full (possibly-truncated) sentence.
+  await expect(page.getByText(/neem contact op met de beheerder/i)).toBeVisible()
 })

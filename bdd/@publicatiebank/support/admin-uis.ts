@@ -3,18 +3,12 @@ import { ENV } from '@/bdd/_core/types'
 
 /**
  * Django-admin driver configs — one per publicatiebank noun the @admin
- * scenarios mutate. Kept here (not in the step files) so the `orgAdmin` /
+ * scenarios mutate. Kept here (not in the step files) so the
  * `topicAdmin` / `pubAdmin` fixtures in `_core/fixture.ts` are the single place
  * a step receives a ready-built {@link AdminDriver}, instead of every step
  * re-deriving the changelist URL and re-constructing the driver.
  */
 const pub = ENV.apps.publicatiebank.replace(/\/$/, '')
-
-export const ORGANISATION_ADMIN: AdminDriverConfig = {
-  noun: 'organisatie',
-  changelist: `${pub}/admin/metadata/organisation/`,
-  add: `${pub}/admin/metadata/organisation/add/`,
-}
 
 export const TOPIC_ADMIN: AdminDriverConfig = {
   noun: 'onderwerp',

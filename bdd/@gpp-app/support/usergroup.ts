@@ -3,18 +3,26 @@ import { ENV } from '@/bdd/_core/types'
 
 /**
  * Read/cleanup helpers for gpp-app gebruikersgroepen via the odpc JSON API
- * (`/api/gebruikersgroepen`, session-authenticated). The @beheer scenarios mutate
- * gebruikersgroepen through the gpp-app UI with Stagehand; these helpers verify
- * the result and clean up deterministically — the same split as the publicatie
- * beheer scenarios (Stagehand mutate, deterministic read).
+ * (`/api/gebruikersgroepen`, session-authenticated). Testscript 5 mutates
+ * gebruikersgroepen through the gpp-app UI with plain Playwright; these helpers
+ * verify the result and clean up deterministically.
  *
  * The list endpoint returns `[{ naam, uuid }]`; that is enough to assert a group
- * exists / was renamed / was deleted, and to resolve a uuid for cleanup.
+ * exists / was renamed / was deleted, and to resolve a uuid for cleanup. The
+ * detail endpoint (`/api/gebruikersgroepen/{uuid}`) additionally carries
+ * `omschrijving`, `gekoppeldeGebruikers` and `gekoppeldeWaardelijsten` — see
+ * {@link getUsergroupDetail}.
  */
 
 interface Usergroup {
   naam: string
   uuid: string
+}
+
+export interface UsergroupDetail extends Usergroup {
+  omschrijving: string
+  gekoppeldeGebruikers: string[]
+  gekoppeldeWaardelijsten: string[]
 }
 
 function endpoint() {
@@ -43,6 +51,20 @@ export async function deleteUsergroupByName(ctx: APIRequestContext, naam: string
   const res = await ctx.delete(`${endpoint()}/${group.uuid}`)
   if (!res.ok() && res.status() !== 404)
     throw new Error(`DELETE gebruikersgroep ${group.uuid} -> ${res.status()}`)
+}
+
+/**
+ * Full detail (omschrijving + gekoppelde gebruikers/waardelijsten) of a
+ * gebruikersgroep by exact naam. Throws if no group with that naam exists.
+ */
+export async function getUsergroupDetail(ctx: APIRequestContext, naam: string): Promise<UsergroupDetail> {
+  const group = (await listUsergroups(ctx)).find(g => g.naam === naam)
+  if (!group)
+    throw new Error(`Gebruikersgroep "${naam}" not found`)
+  const res = await ctx.get(`${endpoint()}/${group.uuid}`)
+  if (!res.ok())
+    throw new Error(`GET gebruikersgroep ${group.uuid} -> ${res.status()}: ${await res.text()}`)
+  return res.json()
 }
 
 /** Naam of leftover `E2E `-prefixed gebruikersgroepen, for the run-wide sweep. */

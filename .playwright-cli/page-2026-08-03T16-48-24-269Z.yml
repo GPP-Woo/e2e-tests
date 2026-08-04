@@ -1,0 +1,27 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - link [ref=f2e5] [cursor=pointer]:
+      - /url: https://www.maykinmedia.nl
+      - img "Maykin Media" [ref=f2e6]
+    - paragraph [ref=f2e7]: Maykin
+    - 'heading "{ Sign in to your account }" [level=1] [ref=f2e8]'
+  - generic [ref=f2e10]:
+    - generic [ref=f2e13]:
+      - generic [ref=f2e14]:
+        - generic [ref=f2e15]: Username or email
+        - textbox "Username or email" [active] [ref=f2e16]
+      - generic [ref=f2e17]:
+        - generic [ref=f2e18]: Password
+        - textbox "Password" [ref=f2e19]
+      - link "Forgot password?" [ref=f2e22] [cursor=pointer]:
+        - /url: /realms/maykin-icatt/login-actions/reset-credentials?client_id=woo-publicaties.test.opengem.nl&tab_id=sKuNqxTKeAs&client_data=eyJydSI6Imh0dHBzOi8vd29vLXB1YmxpY2F0aWVzLnRlc3Qub3BlbmdlbS5ubC9hdXRoL29pZGMvY2FsbGJhY2svIiwicnQiOiJjb2RlIiwic3QiOiJLVmxLTEtpVTgxS1ZCMXhpNkh6M1B3OElPejBOT2xDbiJ9
+      - button "Sign In" [ref=f2e24] [cursor=pointer]
+    - generic [ref=f2e25]:
+      - heading "Or sign in with" [level=4] [ref=f2e26]
+      - list [ref=f2e27]:
+        - listitem [ref=f2e28]:
+          - link "Maykin" [ref=f2e29] [cursor=pointer]:
+            - /url: /realms/maykin-icatt/broker/keycloak-oidc/login?client_id=woo-publicaties.test.opengem.nl&tab_id=sKuNqxTKeAs&client_data=eyJydSI6Imh0dHBzOi8vd29vLXB1YmxpY2F0aWVzLnRlc3Qub3BlbmdlbS5ubC9hdXRoL29pZGMvY2FsbGJhY2svIiwicnQiOiJjb2RlIiwic3QiOiJLVmxLTEtpVTgxS1ZCMXhpNkh6M1B3OElPejBOT2xDbiJ9&session_code=GONGVcruqqUTzf5tzrNp7s5Fs0BjV_IzlYWml-u1Hsc
+        - listitem [ref=f2e31]:
+          - link "ICATT" [ref=f2e32] [cursor=pointer]:
+            - /url: /realms/maykin-icatt/broker/oidc/login?client_id=woo-publicaties.test.opengem.nl&tab_id=sKuNqxTKeAs&client_data=eyJydSI6Imh0dHBzOi8vd29vLXB1YmxpY2F0aWVzLnRlc3Qub3BlbmdlbS5ubC9hdXRoL29pZGMvY2FsbGJhY2svIiwicnQiOiJjb2RlIiwic3QiOiJLVmxLTEtpVTgxS1ZCMXhpNkh6M1B3OElPejBOT2xDbiJ9&session_code=GONGVcruqqUTzf5tzrNp7s5Fs0BjV_IzlYWml-u1Hsc

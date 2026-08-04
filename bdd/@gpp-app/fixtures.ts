@@ -1,9 +1,10 @@
+import type { UsergroupDetail } from './support/usergroup'
 import { publicatiebankTest } from '@/bdd/@publicatiebank/fixtures'
 import { makeResourceManager } from '@/bdd/_core/resource-manager'
 import { adminState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
 import { request as apiRequest } from '@playwright/test'
-import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, firstInformatiecategorie, resolveOrganisatieUuid, usergroupExists } from './support/usergroup'
+import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, firstInformatiecategorie, getUsergroupDetail, resolveOrganisatieUuid, usergroupExists } from './support/usergroup'
 
 /**
  * GPP-app-owned fixtures. Extends the publicatiebank test (not core) because
@@ -12,8 +13,8 @@ import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, firstInfor
 
 /**
  * Owns the gpp-app gebruikersgroepen a scenario creates. Groups are mutated
- * through the gpp-app UI (Stagehand); this manager verifies + cleans up through
- * the odpc JSON API (session-authenticated).
+ * through the gpp-app UI (plain Playwright); this manager verifies + cleans up
+ * through the odpc JSON API (session-authenticated).
  */
 export interface UsergroupManager {
   /** Whether a gebruikersgroep with this naam exists (read over the odpc API). */
@@ -24,6 +25,8 @@ export interface UsergroupManager {
   freshName: () => string
   /** Naam of the most recently tracked gebruikersgroep (throws if none). */
   last: () => string
+  /** Full detail (omschrijving + gekoppelde gebruikers/waardelijsten) of a gebruikersgroep by naam, read over the odpc API. */
+  detail: (naam: string) => Promise<UsergroupDetail>
 }
 
 /** Seeds an authorised profiel (gebruikersgroep) for the eindgebruiker publicatie flows. */
@@ -31,11 +34,12 @@ export interface AuthProfileSeeder {
   /**
    * Create an authorised gebruikersgroep the signed-in admin belongs to (member +
    * one organisatie + one informatiecategorie). Returns the group uuid (the
-   * "Profiel" <option> value) plus the organisatie + informatiecategorie uuids —
-   * the publicatie form's inputs all carry those uuids as their `value`, so the
-   * create flow selects them deterministically.
+   * "Profiel" <option> value) and naam (to open it through the gebruikersgroepen
+   * UI) plus the organisatie + informatiecategorie uuids — the publicatie form's
+   * inputs all carry those uuids as their `value`, so the create flow selects
+   * them deterministically.
    */
-  seed: () => Promise<{ profielUuid: string, organisatieUuid: string, informatiecategorieUuid: string }>
+  seed: () => Promise<{ profielUuid: string, naam: string, organisatieUuid: string, informatiecategorieUuid: string }>
 }
 
 export interface GppAppFixtures {
@@ -62,13 +66,13 @@ export const gppAppTest = publicatiebankTest.extend<GppAppFixtures>({
       workerIndex: testInfo.workerIndex,
       prefix: 'E2E groep ',
       emptyMessage: 'No gebruikersgroep created/tracked in this scenario',
-      // Groups are created through the gpp-app UI (Stagehand), verified + cleaned
-      // up over the odpc API.
+      // Groups are created through the gpp-app UI (plain Playwright), verified +
+      // cleaned up over the odpc API.
       remove: naam => deleteUsergroupByName(ctx, naam),
       exists: naam => usergroupExists(ctx, naam),
     })
     try {
-      await use(manager)
+      await use({ ...manager, detail: naam => getUsergroupDetail(ctx, naam) })
     }
     finally {
       await teardown()
@@ -91,7 +95,7 @@ export const gppAppTest = publicatiebankTest.extend<GppAppFixtures>({
           const naam = `E2E profiel ${testInfo.workerIndex}-${createdUuids.length}-${Date.now()}`
           const uuid = await createAuthorisedGroup(ctx, { naam, gebruikerId, waardelijstUuids: [orgUuid, cat.uuid] })
           createdUuids.push(uuid)
-          return { profielUuid: uuid, organisatieUuid: orgUuid, informatiecategorieUuid: cat.uuid }
+          return { profielUuid: uuid, naam, organisatieUuid: orgUuid, informatiecategorieUuid: cat.uuid }
         },
       })
     }

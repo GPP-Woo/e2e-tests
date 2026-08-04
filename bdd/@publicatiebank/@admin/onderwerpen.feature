@@ -59,17 +59,11 @@ Feature: Configureren van onderwerpen
     When I search the admin for the onderwerp
     Then the onderwerp is shown in the admin results
 
-  # --- @todo: gaps vs. manual testscript 3 (not yet implemented) --------------
-
-  # Manual step 3d: "Klik op de kolomtitels om te sorteren op alfabetische volgorde."
-  @todo
   Scenario: Sort the onderwerpen alphabetically
     Given an onderwerp
     When I sort the onderwerpen list by titel
     Then the onderwerpen are listed in alphabetical order by titel
 
-  # Manual step 3d: "Probeer de filters (rechterzijde)."
-  @todo
   Scenario: Filter the onderwerpen in the admin
     Given an onderwerp
     When I filter the onderwerpen list in the admin
@@ -83,16 +77,12 @@ Feature: Configureren van onderwerpen
     When I open a GPP-app gebruikersgroep to compare onderwerpen
     Then the onderwerp appears in the gebruikersgroep onderwerpen in the GPP-app
 
-  # Manual step 8: "Controleer de logging ... knop 'Toon logs'." (after an edit)
-  @todo
   Scenario: The onderwerp edit is shown in the logs
     Given an onderwerp
     When I change the onderwerp omschrijving and save it
     And I open the "Toon logs" view for the onderwerp
-    Then the omschrijving edit is recorded in the onderwerp logs
+    Then the omschrijving edit is recorded in the onderwerp logs 
 
-  # Manual step 10: "Controleer de logging ... (audit)logitems." (after a delete)
-  @todo
   Scenario: The onderwerp deletion is recorded in the audit log
     Given an onderwerp
     When I delete the onderwerp through the admin

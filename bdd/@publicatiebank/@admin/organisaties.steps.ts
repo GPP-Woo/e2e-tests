@@ -1,16 +1,18 @@
+import type { Page } from '@playwright/test'
+import { resolveOrganisatieUuid } from '@/bdd/@gpp-app/support/usergroup'
+import { openBeheer } from '@/bdd/@publicatiebank/support/login'
 import { organisationExists, organisationIsActive } from '@/bdd/@publicatiebank/support/organisation'
-import { expect } from '@playwright/test'
+import { adminState } from '@/bdd/_core/roles'
+import { ENV } from '@/bdd/_core/types'
+import { request as apiRequest, expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
 /**
- * Testscript 4 (organisaties) steps. UI *mutations* run through the Django admin
- * via Stagehand `act()` on Dutch labels — no hand-written selectors — behind the
- * `orgAdmin` fixture (a ready-built {@link AdminDriver} bound to `adminStagehand`;
- * see _core/fixture.ts). Assertions are made *deterministically* by reading the
- * admin back through the ordinary Playwright `page` (a separate,
- * session-authenticated browser): the token API is unreliable while Stagehand
- * drives the same server (see README "Known server flake"), whereas admin reads
- * authenticate as a real user and are stable.
+ * Testscript 4 (organisaties) steps. Every UI mutation and read runs through
+ * the ordinary session-authenticated Playwright `page` — no Stagehand, no AI
+ * model in the loop. The `@admin` tag this file inherits from its directory
+ * path (`@publicatiebank/@admin`) selects the admin storage state (see
+ * `_core/roles.ts`), so the admin session is already live before any step runs.
  *
  * The organisatie API has no RSIN field and no DELETE, so "edit" is exercised by
  * renaming (naam is visible in the changelist) and cleanup is admin-driven.
@@ -18,8 +20,23 @@ import { Given, Then, When } from '../../_core/fixture'
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
 
-Given('the publicatiebank organisatie admin is open', async ({ orgAdmin }) => {
-  await orgAdmin.openList()
+function randomRsin(): string {
+  return String(100_000_000 + Math.floor(Math.random() * 900_000_000))
+}
+
+async function searchOrganisaties(page: Page, query: string) {
+  await page.getByRole('textbox', { name: 'Search' }).fill(query)
+  await page.getByRole('button', { name: 'Zoeken' }).click()
+}
+
+async function openOrganisatie(page: Page, naam: string) {
+  await searchOrganisaties(page, naam)
+  await page.getByRole('link', { name: naam, exact: true }).click()
+}
+
+Given('the publicatiebank organisatie admin is open', async ({ page }) => {
+  await openBeheer(page)
+  await page.locator('#header').getByRole('link', { name: 'Organisaties' }).click()
 })
 
 // --- prerequisites (deterministic, not the action under test) --------------
@@ -32,14 +49,24 @@ Given('a self-added organisatie that is not active', async ({ organisations }) =
   await organisations.add(undefined, { actief: false })
 })
 
-// --- Add (mutation via Stagehand) ------------------------------------------
+// --- Add ---------------------------------------------------------------
 
-When('I add a self-added organisatie through the admin', async ({ orgAdmin, organisations }) => {
+When('I add a self-added organisatie through the admin', async ({ page, organisations }) => {
   const naam = organisations.freshName()
-  await orgAdmin.openAdd()
-  await orgAdmin.act(`Fill the "Naam" field with: ${naam}`)
-  await orgAdmin.act('Make sure the "Is actief" checkbox is ticked')
-  await orgAdmin.save()
+  await page.getByRole('link', { name: 'organisatie toevoegen' }).click()
+  await page.getByRole('textbox', { name: 'Naam:' }).fill(naam)
+
+  // RSIN isn't required by the organisatie API/model, but fill it when the
+  // admin form renders it so the add flow matches a real recorded session.
+  const rsin = page.getByRole('textbox', { name: 'RSIN:' })
+  if (await rsin.count())
+    await rsin.fill(randomRsin())
+
+  const actief = page.locator('#id_is_actief')
+  if (!(await actief.isChecked()))
+    await actief.check()
+
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click()
   organisations.track(naam)
 })
 
@@ -48,12 +75,12 @@ Then('the organisatie exists in the API and is active', async ({ page, organisat
   await expect.poll(() => organisationIsActive(page, naam), READ).toBe(true)
 })
 
-// --- Activate --------------------------------------------------------------
+// --- Activate ------------------------------------------------------------
 
-When('I tick the {string} checkbox and save the organisatie', async ({ orgAdmin, organisations }, label: string) => {
-  await orgAdmin.open(organisations.last())
-  await orgAdmin.act(`Tick the "${label}" checkbox`)
-  await orgAdmin.save()
+When('I tick the {string} checkbox and save the organisatie', async ({ page, organisations }, _label: string) => {
+  await openOrganisatie(page, organisations.last())
+  await page.locator('#id_is_actief').check()
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click()
 })
 
 Then('the organisatie is active in the API', async ({ page, organisations }) => {
@@ -63,13 +90,13 @@ Then('the organisatie is active in the API', async ({ page, organisations }) => 
 
 // --- Rename (edit) ---------------------------------------------------------
 
-When('I rename the organisatie and save it', async ({ orgAdmin, organisations, scratch }) => {
+When('I rename the organisatie and save it', async ({ page, organisations, scratch }) => {
   const oldName = organisations.last()
   const newName = `${organisations.freshName()} hernoemd`
   scratch.set('org:oldName', oldName)
-  await orgAdmin.open(oldName)
-  await orgAdmin.act(`Replace the contents of the "Naam" field with: ${newName}`)
-  await orgAdmin.save()
+  await openOrganisatie(page, oldName)
+  await page.getByRole('textbox', { name: 'Naam:' }).fill(newName)
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click()
   // Track the new name so teardown deletes the renamed row too.
   organisations.track(newName)
 })
@@ -83,9 +110,10 @@ Then('the API knows the organisatie under its new name and not the old one', asy
 
 // --- Delete ----------------------------------------------------------------
 
-When('I delete the organisatie through the admin', async ({ orgAdmin, organisations }) => {
-  await orgAdmin.open(organisations.last())
-  await orgAdmin.removeCurrent()
+When('I delete the organisatie through the admin', async ({ page, organisations }) => {
+  await openOrganisatie(page, organisations.last())
+  await page.getByRole('link', { name: 'Verwijderen' }).click()
+  await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
 })
 
 Then('the organisatie no longer exists in the API', async ({ page, organisations }) => {
@@ -95,87 +123,96 @@ Then('the organisatie no longer exists in the API', async ({ page, organisations
 
 // --- Search (UI read under test) -------------------------------------------
 
-When('I search the admin for the self-added organisatie', async ({ orgAdmin, organisations }) => {
-  await orgAdmin.search(organisations.last())
+When('I search the admin for the self-added organisatie', async ({ page, organisations }) => {
+  await searchOrganisaties(page, organisations.last())
 })
 
 Then('the self-added organisatie is shown in the admin results', async ({ page, organisations }) => {
   const naam = organisations.last()
-  // The Stagehand search ran above; confirm the organisatie is findable through
-  // the admin deterministically (organisationExists searches the changelist too).
+  // The search above exercised the admin UI; organisationExists confirms it
+  // deterministically (it searches the changelist too).
   expect(await organisationExists(page, naam)).toBe(true)
 })
 
-// ===========================================================================
-// @todo — Testscript 4 coverage gaps (gap matrix rows 56-65). Stubs only: the
-// @todo Before hook skips these scenarios, but the steps must be registered so
-// bddgen stays green. Follow the file's split: mutate/read the changelist UI via
-// `orgAdmin` (Stagehand), assert deterministically through the session `page`.
-// ===========================================================================
-
 // --- Sort (changelist ordering under test) ---------------------------------
 
-When('I sort the organisatie changelist by the {string} column', async ({}, _column: string) => {
-  // Impl: orgAdmin.act(`Click the "${_column}" column header to sort the table`), then settle.
-  throw new Error('TODO: click the changelist column header via orgAdmin.act to sort by naam')
+When('I sort the organisatie changelist by the {string} column', async ({ page }, column: string) => {
+  await page.getByRole('link', { name: column }).click()
 })
 
-Then('the organisaties are listed in alphabetical order by name', async () => {
-  // Impl: read the `th.field-naam a` cells off the changelist on `page` and assert
-  // the array equals its locale-sorted copy (see admin-resource nameCell selector).
-  throw new Error('TODO: read the naam column off the changelist and assert ascending order')
+Then('the organisaties are listed in alphabetical order by name', async ({ page }) => {
+  const names = (await page.locator('th.field-naam a').allTextContents()).map(n => n.trim())
+  expect(names.length).toBeGreaterThan(0)
+  expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)))
 })
 
 // --- Filter (right-side "actief" filter under test) ------------------------
 
-When('I filter the organisatie changelist on active organisaties', async () => {
-  // Impl: orgAdmin.act('Use the filter on the right to show only actieve organisaties'), then settle.
-  throw new Error('TODO: apply the right-hand "actief" changelist filter via orgAdmin.act')
+When('I filter the organisatie changelist on active organisaties', async ({ page }) => {
+  await page.locator('#changelist-filter').getByRole('link', { name: 'Ja', exact: true }).click()
 })
 
-Then('only active organisaties are shown in the results', async () => {
-  // Impl: for each naam in the filtered changelist assert organisationIsActive(page, naam) is true;
-  // at minimum confirm the tracked self-added org (created actief) is present.
-  throw new Error('TODO: assert every organisatie in the filtered results is active')
+Then('only active organisaties are shown in the results', async ({ page, organisations }) => {
+  const names = (await page.locator('th.field-naam a').allTextContents()).map(n => n.trim())
+  expect(names).toContain(organisations.last())
+  for (const naam of names)
+    expect(await organisationIsActive(page, naam)).toBe(true)
 })
 
 // --- Cross-application: publicatiebank vs GPP-app waardelijst ---------------
 
-When('I list the active organisaties in the admin', async () => {
-  // Impl: filter the changelist to actief and collect the naam cells, storing the
-  // set in `scratch` (JSON) for the Then to compare against the GPP-app.
-  throw new Error('TODO: collect the active organisatie names from the admin into scratch')
+When('I list the active organisaties in the admin', async ({ page, scratch }) => {
+  await page.locator('#changelist-filter').getByRole('link', { name: 'Ja', exact: true }).click()
+  const names = (await page.locator('th.field-naam a').allTextContents()).map(n => n.trim())
+  scratch.set('org:activeNames', JSON.stringify(names))
 })
 
-Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async () => {
-  // Impl: read the gpp-app waardelijst via a session ctx (apiRequest.newContext({ storageState: adminState }))
-  // and GET /api/v2/organisaties (see @gpp-app/support/usergroup resolveOrganisatieUuid); assert the
-  // scratch set of active names is a subset of the GPP-app organisatie namen.
-  throw new Error('TODO: cross-check the active admin organisaties against the GPP-app /api/v2/organisaties list')
+Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async ({ scratch }) => {
+  const names: string[] = JSON.parse(scratch.get('org:activeNames') ?? '[]')
+  expect(names.length).toBeGreaterThan(0)
+  // Session-authenticated gpp-app (odpc) API context — same pattern the
+  // authProfile fixture (@gpp-app/fixtures.ts) uses to resolve organisatie uuids.
+  const ctx = await apiRequest.newContext({ storageState: adminState })
+  try {
+    for (const naam of names)
+      await expect(resolveOrganisatieUuid(ctx, naam)).resolves.toBeTruthy()
+  }
+  finally {
+    await ctx.dispose()
+  }
 })
 
 // --- Logging: "Toon logs" on a self-added organisatie ----------------------
 
-When('I open the organisatie logs via {string}', async ({}, _button: string) => {
-  // Impl: orgAdmin.act(`Click the "${_button}" button on the organisatie detail page`), then settle.
-  throw new Error('TODO: open the organisatie logs by clicking the "Toon logs" button via orgAdmin.act')
+When('I open the organisatie logs via {string}', async ({ page, organisations }, _button: string) => {
+  // The changelist row's second link is the "Toon logs" icon — it has no
+  // accessible name of its own (icon-only), so it's targeted positionally
+  // within the row scoped by naam rather than by name.
+  await page.getByRole('row', { name: organisations.last() }).getByRole('link').nth(1).click()
 })
 
-Then('the edit is recorded in the organisatie logs', async () => {
-  // Impl: on the logs page (session `page`), assert a "gewijzigd"/"Naam" entry exists
-  // for the renamed organisatie (organisations.last()).
-  throw new Error('TODO: assert the rename shows as a wijzigings-logregel for the organisatie')
+Then('the edit is recorded in the organisatie logs', async ({ page, organisations }) => {
+  const entry = page.getByRole('cell', { name: 'Record bijgewerkt' }).first()
+  await expect(entry).toBeVisible()
+  await entry.click()
+  await expect(page.getByText(organisations.last())).toBeVisible()
+  await page.getByRole('link', { name: 'Sluiten' }).click()
 })
 
 // --- Audit logging after delete (Logging tab → (audit)logitems) ------------
 
-When('I open the audit log items', async () => {
-  // Impl: orgAdmin.act('Open the "Logging" tab and go to the (audit)logitems list'), then settle.
-  throw new Error('TODO: navigate to the (audit)logitems changelist via the Logging tab')
+When('I open the audit log items', async ({ page }) => {
+  await page.goto(new URL('/admin/', ENV.apps.publicatiebank).href)
+  await page.getByRole('link', { name: 'Logging' }).click()
+  await page.getByRole('link', { name: '(audit)logitems' }).click()
 })
 
-Then('the deletion of the organisatie is recorded in the audit log', async () => {
-  // Impl: search the (audit)logitems changelist on `page` for the deleted organisatie naam
-  // (organisations.last()) and assert a "verwijderd"/delete entry is present.
-  throw new Error('TODO: assert a delete audit-logitem exists for the removed organisatie')
+Then('the deletion of the organisatie is recorded in the audit log', async ({ page, organisations }) => {
+  const naam = organisations.last()
+  // Django's built-in changelist search box: a stable id across every admin
+  // changelist, regardless of theme.
+  await page.locator('#searchbar').fill(naam)
+  await page.locator('#searchbar').press('Enter')
+  const entries = page.getByRole('row', { name: naam }).filter({ hasText: 'verwijderd' })
+  await expect(entries.first()).toBeVisible()
 })

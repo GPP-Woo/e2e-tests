@@ -2,7 +2,7 @@ import type { AdminDriver } from './support/admin-driver'
 import { coreTest } from '@/bdd/_core/core-fixtures'
 import { makeResourceManager } from '@/bdd/_core/resource-manager'
 import { adminDriver } from './support/admin-driver'
-import { DOCUMENT_ADMIN, ORGANISATION_ADMIN, PUBLICATION_ADMIN, TOPIC_ADMIN } from './support/admin-uis'
+import { DOCUMENT_ADMIN, PUBLICATION_ADMIN, TOPIC_ADMIN } from './support/admin-uis'
 import { deleteDocumentByTitel } from './support/document'
 import { addSelfAddedCategory, deleteCategoryByName } from './support/information-category'
 import { OdrcClient } from './support/odrc'
@@ -131,12 +131,6 @@ export interface PublicatiebankFixtures {
   publications: PublicationManager
   /** Test-owned documents (seeded via the token API, cleaned up via the admin). */
   documents: DocumentManager
-  /**
-   * Django-admin CRUD driver for organisaties, bound to `adminStagehand`.
-   * Steps receive it ready-built (`async ({ orgAdmin }) => …`) instead of
-   * reconstructing the driver each step. See {@link AdminDriver}.
-   */
-  orgAdmin: AdminDriver
   /** Django-admin CRUD driver for onderwerpen, bound to `adminStagehand`. */
   topicAdmin: AdminDriver
   /** Django-admin CRUD driver for publicaties, bound to `adminStagehand`. */
@@ -227,11 +221,8 @@ export const publicatiebankTest = coreTest.extend<PublicatiebankFixtures>({
     await teardown()
   },
   // Page-object drivers bound to the shared adminStagehand browser. Lazy: only
-  // the noun a scenario destructures is built, and all four share one browser
+  // the noun a scenario destructures is built, and all three share one browser
   // if a scenario needs more than one.
-  orgAdmin: async ({ adminStagehand }, use) => {
-    await use(adminDriver(adminStagehand, ORGANISATION_ADMIN))
-  },
   topicAdmin: async ({ adminStagehand }, use) => {
     await use(adminDriver(adminStagehand, TOPIC_ADMIN))
   },

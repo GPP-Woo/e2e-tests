@@ -1,14 +1,17 @@
 import { TOPIC_IMAGE, topicExists, topicIsPromoted, topicOmschrijving } from '@/bdd/@publicatiebank/support/topic'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
 /**
- * Testscript 3 (onderwerpen) steps. UI *mutations* run through the Django admin
- * via Stagehand `act()` behind the `topicAdmin` fixture (a ready-built
+ * Testscript 3 (onderwerpen) steps. Most UI *mutations* run through the Django
+ * admin via Stagehand `act()` behind the `topicAdmin` fixture (a ready-built
  * {@link AdminDriver} bound to `adminStagehand`) — except the mandatory
  * afbeelding on the add form, whose bytes are set straight on the
- * <input type=file> (a CDP browser cannot drive an OS file-picker). Assertions
- * are made *deterministically* by reading the admin back through the ordinary
+ * <input type=file> (a CDP browser cannot drive an OS file-picker), and the
+ * "Add an onderwerp" scenario itself, which is driven deterministically end to
+ * end via plain Playwright `page` locators (no Stagehand). Assertions are made
+ * *deterministically* by reading the admin back through the ordinary
  * Playwright `page` (session-authenticated, stable), because the token API is
  * unreliable while Stagehand drives the same server (see README "Known server
  * flake").
@@ -28,16 +31,25 @@ Given('an onderwerp', async ({ topics }) => {
   await topics.add()
 })
 
-// --- Add (Stagehand for fields; image via setInputFiles carve-out) ----------
+// --- Add (deterministic Playwright — no Stagehand; image via setInputFiles) -
 
-When('I add an onderwerp through the admin', async ({ topicAdmin, topics }) => {
+When('I add an onderwerp through the admin', async ({ page, topics }) => {
   const titel = topics.freshName()
-  await topicAdmin.openAdd()
+  const omschrijving = `E2E omschrijving ${Date.now()}`
+
+  await page.getByRole('link', { name: 'Dashboard' }).click()
+  await page.locator('#header').getByRole('link', { name: 'Onderwerpen' }).click()
+  await page.getByRole('link', { name: 'onderwerp toevoegen' }).click()
+
   // File carve-out: set the required afbeelding bytes directly on the input.
-  await topicAdmin.page.locator('#id_afbeelding').setInputFiles(TOPIC_IMAGE)
-  await topicAdmin.act(`Fill the "Officiële titel" field with: ${titel}`)
-  await topicAdmin.act('Select "Concept" as the publicatiestatus')
-  await topicAdmin.save()
+  await page.locator('#id_afbeelding').setInputFiles(TOPIC_IMAGE)
+
+  await page.getByRole('textbox', { name: 'Officiële titel:' }).fill(titel)
+  await page.getByRole('textbox', { name: 'Omschrijving:' }).fill(omschrijving)
+  await page.getByLabel('Status:').selectOption('concept')
+
+  await page.getByRole('button', { name: 'Opslaan', exact: true }).click()
+
   topics.track(titel)
 })
 
@@ -103,28 +115,28 @@ Then('the onderwerp is shown in the admin results', async ({ page, topics }) => 
 // --- @todo stubs: gaps vs. manual testscript 3 (bodies not yet implemented) -
 // Registered so bddgen stays green; the @todo Before hook skips the scenarios.
 
-// --- Sort (UI read under test) ---------------------------------------------
+// --- Sort (UI read under test, deterministic Playwright — no Stagehand) ----
 
-When('I sort the onderwerpen list by titel', async () => {
-  // Impl: topicAdmin.act('Click the "Officiële titel" column header to sort ascending').
-  throw new Error('TODO: sort the onderwerpen changelist by clicking the titel column header')
+When('I sort the onderwerpen list by titel', async ({ page }) => {
+  await page.getByRole('link', { name: 'Officiële titel', exact: true }).click()
 })
 
-Then('the onderwerpen are listed in alphabetical order by titel', async () => {
-  // Impl: read the changelist titel column via `page` and assert it equals its sorted copy.
-  throw new Error('TODO: read the changelist titel column and assert ascending alphabetical order')
+Then('the onderwerpen are listed in alphabetical order by titel', async ({ page }) => {
+  const titels = await page.locator('th.field-officiele_titel a').allTextContents()
+  const sorted = [...titels].sort((a, b) => a.localeCompare(b))
+  expect(titels).toEqual(sorted)
 })
 
-// --- Filter (UI read under test) -------------------------------------------
+// --- Filter (UI read under test, deterministic Playwright — no Stagehand) --
 
-When('I filter the onderwerpen list in the admin', async () => {
-  // Impl: topicAdmin.act('Apply a filter from the right-hand filter sidebar').
-  throw new Error('TODO: apply an admin filter from the right-hand onderwerp filter sidebar')
+When('I filter the onderwerpen list in the admin', async ({ page }) => {
+  await page.getByRole('link', { name: 'Concept' }).click()
 })
 
-Then('only onderwerpen matching the filter remain visible', async () => {
-  // Impl: read the filtered changelist rows via `page` and assert every row matches the filter.
-  throw new Error('TODO: assert every visible changelist row matches the applied filter')
+Then('only onderwerpen matching the filter remain visible', async ({ page }) => {
+  const statuses = await page.locator('.field-publicatiestatus').allTextContents()
+  expect(statuses.length).toBeGreaterThan(0)
+  expect(statuses.every((status) => status.trim() === 'Concept')).toBe(true)
 })
 
 // --- Compare with the GPP-app (cross-application) --------------------------
@@ -140,26 +152,39 @@ Then('the onderwerp appears in the gebruikersgroep onderwerpen in the GPP-app', 
   throw new Error('TODO: assert the onderwerp is listed among the GPP-app gebruikersgroep onderwerpen')
 })
 
-// --- Logging after edit ("Toon logs") --------------------------------------
+// --- Logging after edit ("Toon logs", UI read under test, deterministic Playwright — no Stagehand) ---
 
-When('I open the "Toon logs" view for the onderwerp', async () => {
-  // Impl: topicAdmin.act('Click the "Toon logs" button on the onderwerp detail page').
-  throw new Error('TODO: open the "Toon logs" view from the onderwerp detail page')
+When('I open the "Toon logs" view for the onderwerp', async ({ page, topics }) => {
+  const titel = topics.last()
+  // The changelist row's second link is the "Toon logs" icon — it has no
+  // accessible name of its own (icon-only), so it's targeted positionally
+  // within the row scoped by titel rather than by name.
+  await page.getByRole('row', { name: titel }).getByRole('link').nth(1).click()
 })
 
-Then('the omschrijving edit is recorded in the onderwerp logs', async () => {
-  // Impl: read the logs page via `page` and assert an entry for the omschrijving change (scratch 'topic:omschrijving').
-  throw new Error('TODO: assert the onderwerp logs contain an entry for the omschrijving edit')
+Then('the omschrijving edit is recorded in the onderwerp logs', async ({ page, scratch }) => {
+  const expected = scratch.get('topic:omschrijving')!
+  const entry = page.getByRole('cell', { name: 'Record bijgewerkt' }).first()
+  await expect(entry).toBeVisible()
+  await entry.click()
+  await expect(page.getByText(expected)).toBeVisible()
+  await page.getByRole('link', { name: 'Sluiten' }).click()
 })
 
-// --- Audit logging after delete --------------------------------------------
+// --- Audit logging after delete (Logging tab → (audit)logitems, UI read under test, deterministic Playwright — no Stagehand) ---
 
-When('I open the onderwerp audit log', async () => {
-  // Impl: navigate via `page` to the "Logging" tab / (audit)logitems changelist and search for the onderwerp.
-  throw new Error('TODO: open the (audit)logitems changelist under the Logging tab')
+When('I open the onderwerp audit log', async ({ page }) => {
+  await page.goto(new URL('/admin/', ENV.apps.publicatiebank).href)
+  await page.getByRole('link', { name: 'Logging' }).click()
+  await page.getByRole('link', { name: '(audit)logitems' }).click()
 })
 
-Then('the onderwerp deletion is recorded in the audit log', async () => {
-  // Impl: assert an audit logitem records the deletion of topics.last() (read the audit changelist via `page`).
-  throw new Error('TODO: assert the audit log contains a delete entry for the onderwerp')
+Then('the onderwerp deletion is recorded in the audit log', async ({ page, topics }) => {
+  const titel = topics.last()
+  // Django's built-in changelist search box: a stable id across every admin
+  // changelist, regardless of theme.
+  await page.locator('#searchbar').fill(titel)
+  await page.locator('#searchbar').press('Enter')
+  const entries = page.getByRole('row', { name: titel }).filter({ hasText: 'verwijderd' })
+  await expect(entries.first()).toBeVisible()
 })

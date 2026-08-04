@@ -2,33 +2,15 @@
 #
 # A functioneel-beheerder manages the organisaties waardelijst in the
 # GPP-publicatiebank admin: activating organisations, adding a self-added one,
-# renaming it, and deleting it. Every UI *mutation* is driven by an AI agent
-# (Stagehand + an OpenRouter model) operating the Dutch Django-admin from
-# natural-language intent — no hand-written selectors. Assertions are made
-# deterministically by reading the admin back through a separate,
-# session-authenticated Playwright browser (the token API is unreliable while
-# Stagehand drives the same server — see README "Known server flake").
+# renaming it, and deleting it. Every step runs through pure Playwright against
+# the ordinary session-authenticated admin `page` — no AI-driven DOM operation.
 #
 # Test-owned data: each scenario creates the self-added organisatie it needs and
 # the `organisations` fixture (bdd/fixture.ts) deletes it again in teardown
 # (deterministically, via the admin — the organisatie API has no DELETE). Names
 # are unique per worker, so parallel scenarios never collide, and the
 # waardelijst reference organisaties are left untouched.
-#
-# Requires OPENROUTER_API_KEY (else every scenario skips) — see README.
-#
-# @ai — marks this as a Stagehand scenario (skipped without OPENROUTER_API_KEY).
-# Runs on the cheap default (Gemini Flash). If the admin DOM acts prove flaky,
-# add @expensive-ai (Claude Sonnet) or pin one model with @model:<openrouter-id>.
-# See the README "AI model routing" table.
-#
-# @mode:serial — like the @beheer feature, the AI DOM operations are more
-# reliable one-at-a-time, and it keeps concurrent load off the publicatiebank
-# (its user-less-token API path 500s intermittently under parallel load).
 
-# @timeout — each scenario drives several Stagehand act() calls (each an LLM
-# round-trip) plus API polling, which comfortably exceeds the 30s default.
-@ai @mode:serial @timeout:120000
 Feature: Configureren van organisaties
   As a functioneel-beheerder of the GPP-publicatiebank
   I want to activate, add, edit and delete organisaties
@@ -46,9 +28,6 @@ Feature: Configureren van organisaties
     When I tick the "Actief" checkbox and save the organisatie
     Then the organisatie is active in the API
 
-  # @expensive-ai — the rename act flakes on the default model; Claude Sonnet
-  # applies it reliably.
-  @expensive-ai
   Scenario: Rename a self-added organisatie
     Given a self-added organisatie
     When I rename the organisatie and save it
@@ -64,36 +43,26 @@ Feature: Configureren van organisaties
     When I search the admin for the self-added organisatie
     Then the self-added organisatie is shown in the admin results
 
-  # --- @todo: Testscript 4 coverage gaps (gap matrix rows 56-65) --------------
-  # Drafted from the manual testscript; the step bodies below are stubs that
-  # throw, and the @todo Before hook (bdd/_core/todo.steps.ts) skips-with-reason
-  # so they never fake a pass. Remove @todo once the bodies land.
-
-  @todo
   Scenario: Sort the organisaties alphabetically by name
     When I sort the organisatie changelist by the "Naam" column
     Then the organisaties are listed in alphabetical order by name
 
-  @todo
   Scenario: Filter the organisaties on active state
     Given a self-added organisatie
     When I filter the organisatie changelist on active organisaties
     Then only active organisaties are shown in the results
 
-  @todo
   Scenario: Active organisaties match the GPP-app waardelijst
     Given a self-added organisatie
     When I list the active organisaties in the admin
     Then the same organisaties are available in the GPP-app gebruikersgroep waardelijst
 
-  @todo
   Scenario: Editing a self-added organisatie is logged
     Given a self-added organisatie
     When I rename the organisatie and save it
     And I open the organisatie logs via "Toon logs"
     Then the edit is recorded in the organisatie logs
 
-  @todo
   Scenario: Deleting a self-added organisatie is audit-logged
     Given a self-added organisatie
     When I delete the organisatie through the admin
