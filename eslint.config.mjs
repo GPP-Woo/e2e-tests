@@ -3,7 +3,10 @@ import antfu from '@antfu/eslint-config'
 export default antfu({
   // *.check.ts are standalone node run-scripts (top-level await + console by design).
   // scratch/ holds throwaway run artifacts (reports, logs) — not source.
-  ignores: ['**/*.check.ts', 'scratch/**'],
+  // .claude/ is vendored agent-skill docs; .playwright-cli/ is captured page
+  // snapshots. Both are generated/third-party markdown+yaml: reformatting them
+  // to our style is churn, and CI failed on it.
+  ignores: ['**/*.check.ts', 'scratch/**', '.claude/**', '.playwright-cli/**'],
   formatters: true,
   typescript: {
     overrides: {

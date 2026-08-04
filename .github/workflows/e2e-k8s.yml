@@ -21,7 +21,10 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # ~10 min to build the images and bring the stack up, then the suite itself.
+    # 60 was not enough once the @todo gap scenarios were implemented and the run
+    # got cancelled mid-suite, which uploads no report and tells you nothing.
+    timeout-minutes: 90
     env:
       # Single source of truth: keep in sync with the Helm used locally for
       # hack/up.sh (needs Helm 4 for `--server-side --force-conflicts`).
@@ -113,7 +116,9 @@ jobs:
         run: npm test
 
       - name: Dump cluster state on failure
-        if: ${{ failure() }}
+        # cancelled() too: a timeout-cancel is the case where a wedged pod is the
+        # likeliest cause, so that is when this dump is worth the most.
+        if: ${{ failure() || cancelled() }}
         run: |
           kubectl -n gpp-e2e get pods -o wide || true
           kubectl -n gpp-e2e get elasticsearch || true
@@ -124,9 +129,11 @@ jobs:
           done
           kubectl -n gpp-e2e logs -l app=openzaak --tail=100 || true
 
-      # Zip for PR runs and for anyone who wants the raw report.
+      # Zip for PR runs and for anyone who wants the raw report. `always()`, not
+      # `!cancelled()`: a job that hits timeout-minutes counts as cancelled, and
+      # that is exactly when you most want the partial report.
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         with:
           name: playwright-report
           path: e2e-tests/playwright-report

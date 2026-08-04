@@ -11,7 +11,7 @@ import { Given, Then, When } from '../../_core/fixture'
  * <input type=file> (a CDP browser cannot drive an OS file-picker), and the
  * "Add an onderwerp" scenario itself, which is driven deterministically end to
  * end via plain Playwright `page` locators (no Stagehand). Assertions are made
- * *deterministically* by reading the admin back through the ordinary
+ * `deterministically` by reading the admin back through the ordinary
  * Playwright `page` (session-authenticated, stable), because the token API is
  * unreliable while Stagehand drives the same server (see README "Known server
  * flake").
@@ -136,7 +136,7 @@ When('I filter the onderwerpen list in the admin', async ({ page }) => {
 Then('only onderwerpen matching the filter remain visible', async ({ page }) => {
   const statuses = await page.locator('.field-publicatiestatus').allTextContents()
   expect(statuses.length).toBeGreaterThan(0)
-  expect(statuses.every((status) => status.trim() === 'Concept')).toBe(true)
+  expect(statuses.every(status => status.trim() === 'Concept')).toBe(true)
 })
 
 // --- Compare with the GPP-app (cross-application) --------------------------

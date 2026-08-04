@@ -43,10 +43,13 @@ export default defineConfig({
      act() occasionally misfires (rotating across scenarios run-to-run), and the
      SPA/admin teardown can time out on a slow firefox/webkit under emulated-
      backend load. A single retry absorbs these transient flakes without masking a
-     real, reproducible failure (which fails twice). CI retries twice (slower,
-     noisier infra); locally once. @expensive-ai on the repeat offenders lowers
-     the first-attempt miss rate so the retry is rarely needed. */
-  retries: process.env.CI ? 2 : 1,
+     real, reproducible failure (which fails twice). @expensive-ai on the repeat
+     offenders lowers the first-attempt miss rate so the retry is rarely needed.
+     One retry everywhere: the @ai scenarios carry @timeout:120000/@timeout:240000,
+     so a second CI retry costs up to 4 extra minutes *per broken scenario* — that
+     alone pushed the k8s run past its job timeout without catching anything a
+     single retry doesn't. */
+  retries: 1,
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
@@ -55,8 +58,12 @@ export default defineConfig({
     : [['html'], ['line']],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on',
+    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer
+       Always-on tracing is what makes the published report interactive, but on CI
+       it also records ~390 passing traces nobody opens — CPU the kind cluster on
+       the same runner needs, and a report near the 1 GB Pages cap. Keep it on
+       locally; on CI trace only the retry of something that actually failed. */
+    trace: process.env.CI ? 'on-first-retry' : 'on',
 
     /* Resolve the local Keycloak hostname (used as OIDC issuer) to localhost so the
        browser reaches the published Keycloak port without an /etc/hosts entry. */
