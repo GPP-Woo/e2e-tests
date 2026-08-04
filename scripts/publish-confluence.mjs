@@ -138,9 +138,10 @@ export function storageBody(report, links, gherkin = new Map()) {
   for (const x of all) byFile.set(x.file, [...(byFile.get(x.file) ?? []), x])
 
   const row = (x) => {
-    const status = `${ICON[x.status]}<br/>${esc(LABEL[x.status])}${x.note ? `<br/>${esc(x.note)}` : ''}`
+    const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}`
+      + `<br/>${testLink(reportUrl, x, 'report')}`
     return `<tr><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario))}</td><td>${status}</td>`
-      + `<td>${esc(x.title)}</td><td>${testLink(reportUrl, x, 'report')}</td></tr>`
+      + `<td>${esc(x.title)}</td></tr>`
   }
 
   return [
@@ -156,8 +157,9 @@ export function storageBody(report, links, gherkin = new Map()) {
     `<p>${esc(`${ICON.expected} passed · ${ICON.unexpected} failed · ${ICON.flaky} flaky · ${ICON.skipped} skipped (@todo or browser-excluded)`)}</p>`,
     ...[...byFile].flatMap(([file, list]) => [
       `<h3>${esc(file)}</h3>`,
-      '<table><tbody>',
-      '<tr><th>Gherkin</th><th>Status</th><th>Path</th><th>Report</th></tr>',
+      // full-width breaks the table out of the page's fixed content column
+      '<table data-layout="full-width"><tbody>',
+      '<tr><th>Gherkin</th><th>Status</th><th>Path</th></tr>',
       ...list.map(row),
       '</tbody></table>',
     ]),
@@ -242,12 +244,13 @@ if (process.argv[2] === '--selfcheck') {
   const gk = new Map([['a.feature::b<ad>', 'Scenario: b<ad>\n  Given x']])
   const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' }, gk)
   assert.match(html, /❌ FAILED/)
-  assert.match(html, /<th>Gherkin<\/th><th>Status<\/th><th>Path<\/th><th>Report<\/th>/)
+  assert.match(html, /<table data-layout="full-width">/) // tables span the full page width
+  assert.match(html, /<th>Gherkin<\/th><th>Status<\/th><th>Path<\/th><\/tr>/)
   assert.match(html, /<td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/) // gherkin, escaped, newlines kept
-  assert.match(html, /<td>⛔<br\/>failed<br\/>webkit<\/td>/) // icon + state + browser on their own lines
+  // icon - state (browser), report link on the next line
+  assert.match(html, /<td>⛔ - failed \(webkit\)<br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><\/td>/)
   assert.match(html, /<td>Feature: grp › b&lt;ad&gt;<\/td>/) // path column
-  assert.match(html, /href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report</) // report column
-  assert.match(html, /<td><\/td><td>⏭️<br\/>skipped<\/td>/) // no gherkin source -> empty cell, row still rendered
+  assert.match(html, /<td><\/td><td>⏭️ - skipped<br\//) // no gherkin source -> empty cell, row still rendered
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
   assert.deepEqual(failures({}), [])
   assert.equal(gherkinIndex('does-not-exist').size, 0) // missing sources must not crash the publish
