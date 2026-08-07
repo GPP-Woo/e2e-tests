@@ -20,6 +20,17 @@ export async function openBeheer(page: Page) {
 }
 
 /**
+ * Open an admin changelist from the header nav. The django-admin-index header
+ * groups the models under collapsed dropdowns ("Publicaties", "Metadata", …);
+ * the model links only become visible once the group is clicked, so clicking
+ * the model link straight away waits forever on a hidden element.
+ */
+export async function openAdminSection(page: Page, group: string, model: string) {
+  await page.locator('#header').getByText(group, { exact: true }).click()
+  await page.locator('#header').getByRole('link', { name: model, exact: true }).click()
+}
+
+/**
  * Sign in to the GPP-publicatiebank (odrc) Django admin via Keycloak OIDC.
  *
  * Flow: landing page -> "Beheer" -> admin login -> "Inloggen met

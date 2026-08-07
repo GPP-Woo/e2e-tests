@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { openBeheer } from '@/bdd/@publicatiebank/support/login'
+import { openAdminSection, openBeheer } from '@/bdd/@publicatiebank/support/login'
 import { Given, Then, When } from '@/bdd/_core/fixture'
 import { expect } from '@playwright/test'
 
@@ -31,8 +31,7 @@ Given('I have added a self-added information category', async ({ categories }) =
 })
 
 Given('I open the {string} metadata page', async ({ page }, name: string) => {
-  await page.locator('#header').getByText('Metadata').click()
-  await page.locator('#header').getByRole('link', { name }).click()
+  await openAdminSection(page, 'Metadata', name)
 })
 
 Then('the {string} column header is visible and clickable', async ({ page }, header: string) => {

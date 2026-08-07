@@ -1,3 +1,4 @@
+import { openAdminSection } from '@/bdd/@publicatiebank/support/login'
 import { TOPIC_IMAGE, topicExists, topicIsPromoted, topicOmschrijving } from '@/bdd/@publicatiebank/support/topic'
 import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
@@ -38,7 +39,7 @@ When('I add an onderwerp through the admin', async ({ page, topics }) => {
   const omschrijving = `E2E omschrijving ${Date.now()}`
 
   await page.getByRole('link', { name: 'Dashboard' }).click()
-  await page.locator('#header').getByRole('link', { name: 'Onderwerpen' }).click()
+  await openAdminSection(page, 'Publicaties', 'Onderwerpen')
   await page.getByRole('link', { name: 'onderwerp toevoegen' }).click()
 
   // File carve-out: set the required afbeelding bytes directly on the input.
