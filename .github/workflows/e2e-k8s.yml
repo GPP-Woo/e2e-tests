@@ -43,7 +43,11 @@ jobs:
       - uses: actions/checkout@v4
         with: {repository: GPP-Woo/GPP-burgerportaal, ref: feat/local-dev-stack, path: GPP-burgerportaal}
       - uses: actions/checkout@v4
-        with: {repository: GPP-Woo/GPP-publicatiebank, path: GPP-publicatiebank}
+        # Pinned, not default: main still returns `(None, token)` from
+        # TokenAuthentication, and SessionProfileMiddleware then dereferences
+        # request.user -> every token API call 500s while an admin session is
+        # active. Drop the ref once fix/token-auth-anonymoususer is merged.
+        with: {repository: GPP-Woo/GPP-publicatiebank, ref: fix/token-auth-anonymoususer, path: GPP-publicatiebank}
       - uses: actions/checkout@v4
         # submodules: shared/dotgithub provides fileTypes.json, required by the image build
         with: {repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true}

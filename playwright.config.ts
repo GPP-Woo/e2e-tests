@@ -27,6 +27,13 @@ const testDir = defineBddConfig({
 })
 
 /**
+ * Resolve the local Keycloak hostname (used as OIDC issuer) to localhost so the
+ * browser reaches the published Keycloak port without an /etc/hosts entry.
+ * Chromium-only — see the note in `use` for why it must not be set globally.
+ */
+const KEYCLOAK_HOST_RESOLVER = '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1'
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
@@ -72,11 +79,14 @@ export default defineConfig({
        locally; on CI trace only the retry of something that actually failed. */
     trace: process.env.CI ? 'on-first-retry' : 'on',
 
-    /* Resolve the local Keycloak hostname (used as OIDC issuer) to localhost so the
-       browser reaches the published Keycloak port without an /etc/hosts entry. */
-    launchOptions: {
-      args: ['--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1'],
-    },
+    /* NOTE: --host-resolver-rules is deliberately NOT set here. It is a Chromium-only
+       flag, and the WebKit build on Linux *hard-errors* on an unknown option
+       ("Cannot parse arguments: Unknown option --host-resolver-rules=…") so the
+       browser never launches — every webkit scenario then fails with
+       "Target page, context or browser has been closed". macOS WebKit tolerates it,
+       which is exactly why this only ever showed up on CI. Firefox cannot use the
+       flag either, and the scenarios that need it are @chromium-only, so it belongs
+       on the chromium project alone (see below). */
   },
 
   /* Configure projects for major browsers */
@@ -87,6 +97,10 @@ export default defineConfig({
       name: 'setup',
       testDir: './setup',
       testMatch: /auth\.setup\.ts/,
+      /* Runs on chromium (no browser override) and performs the real Keycloak
+         sign-in, so this is the one project that genuinely needs the resolver
+         rule — see the note in `use`. */
+      use: { launchOptions: { args: [KEYCLOAK_HOST_RESOLVER] } },
     },
     {
       name: 'chromium',
@@ -96,10 +110,11 @@ export default defineConfig({
            (see bdd/_core/stagehand.ts cdpEndpointForWorker — the port must
            match: 9330 + the worker's parallel index) and share one traced page.
            Unused until a scenario is tagged @ai, but the port must already be
-           open when one is. Keep the Keycloak host-resolver arg from `use`. */
+           open when one is. Carries the Keycloak resolver rule too, since it is
+           set per-project rather than in `use` (see the note there). */
         launchOptions: {
           args: [
-            '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1',
+            KEYCLOAK_HOST_RESOLVER,
             `--remote-debugging-port=${9330 + Number(process.env.TEST_PARALLEL_INDEX ?? 0)}`,
           ],
         },
