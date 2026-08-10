@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
-import { expect } from '@playwright/test'
 import path from 'node:path'
 import { ENV } from '@/bdd/_core/types'
+import { expect } from '@playwright/test'
 
 /**
  * Plain-Playwright driver for the gpp-app (odpc) eindgebruiker publicatie flows
@@ -167,7 +167,7 @@ export async function publishAndConfirmViaUi(page: Page) {
  * veld"). Nothing in the DOM marks the dialog as ready (no disabled/inert
  * state), so watch for the write itself and click again if it never came.
  */
-async function confirmWrite(page: Page, name: string) {
+export async function confirmWrite(page: Page, name: string) {
   const button = page.getByRole('button', { name })
   await button.waitFor({ state: 'visible' })
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -470,9 +470,32 @@ export function withdrawButton(page: Page) {
   return page.getByRole('button', { name: 'Publicatie intrekken' })
 }
 
-/** The confirmation dialog opened by clicking {@link withdrawButton}. */
+/**
+ * A publicatie's own row in a publicaties list. Each row renders its status as a
+ * `<span role="status">` ("Deze publicatie is ingetrokken." …) alongside the
+ * titel, so scoping to the row is what keeps a status assertion about *this*
+ * publicatie rather than about anything else on the page.
+ */
+export function publicatieListItem(page: Page, titel: string) {
+  return page.getByRole('listitem').filter({ hasText: titel })
+}
+
+/**
+ * The confirmation dialog opened by clicking {@link withdrawButton}.
+ *
+ * Identified by its heading, not by an accessible name: PromptModal.vue renders a
+ * bare `<dialog>` with no aria-label/aria-labelledby, and a `<dialog>` does not
+ * take its name from a heading inside it — so `getByRole('dialog', {name: ...})`
+ * matches nothing at all. (That missing name is a real a11y gap in the GPP-app;
+ * screen readers announce the modal unnamed. Worth fixing there.) The page mounts
+ * one PromptModal per action (concept/verwijderen/intrekken/claimen/…), so the
+ * heading is what tells them apart — a closed `<dialog>` is display:none and out
+ * of the a11y tree, but scoping by heading keeps this honest either way.
+ */
 export function intrekkenDialog(page: Page) {
-  return page.getByRole('dialog', { name: /intrekken/i })
+  return page.getByRole('dialog').filter({
+    has: page.getByRole('heading', { name: 'Publicatie intrekken' }),
+  })
 }
 
 /**
@@ -548,7 +571,7 @@ export async function withdrawViaUi(page: Page, titel: string) {
 export async function openCollegaPublicaties(page: Page) {
   await page.goto(gppApp)
   await settle(page)
-  await page.getByRole('link', { name: "Publicaties van collega's" }).click()
+  await page.getByRole('link', { name: 'Publicaties van collega\'s' }).click()
   await settle(page)
 }
 

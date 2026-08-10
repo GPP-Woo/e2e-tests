@@ -11,6 +11,7 @@
  */
 
 import type { SitemapClient } from '@/bdd/@burgerportaal/fixtures'
+import process from 'node:process'
 
 /** `<tag>` with an optional namespace prefix, e.g. `loc` or `diwoo:Document`. */
 function tag(name: string) {
@@ -150,23 +151,79 @@ export async function collectAllUrlEntries(
 }
 
 /**
+ * How long a sitemap read may keep retrying before the caller asserts on it.
+ * Override with `SITEMAP_POLL_TIMEOUT_MS` on a slow environment.
+ */
+const POLL_TIMEOUT_MS = Number(process.env.SITEMAP_POLL_TIMEOUT_MS ?? 20_000)
+const POLL_INTERVAL_MS = 500
+
+/**
+ * Re-read until `accept` is satisfied, or the budget runs out (then return the
+ * last value read, so the caller's own assertion produces the failure message).
+ *
+ * The sitemap is *eventually* consistent with the token API: ODRC registers an
+ * uploaded document with the Documenten API asynchronously, so a document
+ * seeded a moment ago is briefly absent from the sitemap — and a withdrawn or
+ * deleted one briefly still present. Sequentially the window closes before the
+ * next step looks; under parallel workers it does not (verified: the whole
+ * feature passes with `--workers=1` and loses 4+ scenarios in parallel, always
+ * on a fast "not present yet", never on a mismatch).
+ */
+async function pollUntil<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS
+  let value = await read()
+  while (!accept(value) && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+    value = await read()
+  }
+  return value
+}
+
+/**
  * Find the single `<url>` entry for a seeded document across all monthly
  * sitemaps. Matches by document UUID in `<loc>` when known, else by
- * `officieleTitel`.
+ * `officieleTitel`. Polls while the entry is absent (see {@link pollUntil}).
  */
 export async function findDocumentEntry(
   sitemap: SitemapClient,
   burgerportaalBase: string,
   opts: { uuid?: string, officieleTitel?: string },
 ): Promise<string | undefined> {
-  const entries = await collectAllUrlEntries(sitemap, burgerportaalBase)
-  return entries.find((entry) => {
-    if (opts.uuid && entryMatchesDocumentUuid(entry, opts.uuid))
-      return true
-    if (opts.officieleTitel && entryMatchesOfficieleTitel(entry, opts.officieleTitel))
-      return true
-    return false
-  })
+  return pollUntil(
+    async () => {
+      const entries = await collectAllUrlEntries(sitemap, burgerportaalBase)
+      return entries.find((entry) => {
+        if (opts.uuid && entryMatchesDocumentUuid(entry, opts.uuid))
+          return true
+        if (opts.officieleTitel && entryMatchesOfficieleTitel(entry, opts.officieleTitel))
+          return true
+        return false
+      })
+    },
+    entry => !!entry,
+  )
+}
+
+/** Path of the sitemap covering "now" (the month change-propagation asserts on). */
+export function currentMonthSitemapPath(): string {
+  const now = new Date()
+  return `/api/sitemap/${now.getFullYear()}/${now.getMonth() + 1}.xml`
+}
+
+/**
+ * GET the current month's sitemap, polling until its `<url>` entries satisfy
+ * `accept`. Returns the last entries read either way, so the calling step keeps
+ * ownership of the assertion (and of its failure message).
+ */
+export async function currentMonthEntriesUntil(
+  sitemap: SitemapClient,
+  accept: (entries: string[]) => boolean,
+): Promise<string[]> {
+  const path = currentMonthSitemapPath()
+  return pollUntil(async () => {
+    await sitemap.get(path)
+    return urlEntries(sitemap.last().body)
+  }, accept)
 }
 
 /**

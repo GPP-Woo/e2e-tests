@@ -1,3 +1,4 @@
+@timeout:120000
 Feature: DiWoo sitemap
   As the landelijke Woo-index harvester
   I want to read the GPP-burgerportaal sitemap anonymously

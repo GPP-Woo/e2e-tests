@@ -1,5 +1,6 @@
 import type { APIRequestContext, Page } from '@playwright/test'
 import { Buffer } from 'node:buffer'
+import process from 'node:process'
 import { ENV } from '@/bdd/_core/types'
 import { request as apiRequest } from '@playwright/test'
 import { adminResource } from './admin-resource'

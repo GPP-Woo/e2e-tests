@@ -191,8 +191,8 @@ export function storageBody(report, links, gherkin = new Map()) {
   for (const x of all) byFile.set(x.file, [...(byFile.get(x.file) ?? []), x])
 
   const row = (x) => {
-    const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}`
-      + (x.reason ? `<br/>${esc(x.reason)}` : '')
+    const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}${
+      x.reason ? `<br/>${esc(x.reason)}` : ''}`
     const meta = `${status}<br/><br/>${testLink(reportUrl, x, 'report')}<br/><br/>${esc(x.title)}`
     return `<tr><td>${meta}</td><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario, x.title))}</td></tr>`
   }

@@ -1,5 +1,8 @@
+import type { SitemapClient } from '@/bdd/@burgerportaal/fixtures'
 import {
   collectAllUrlEntries,
+  currentMonthEntriesUntil,
+  currentMonthSitemapPath,
   elementText,
   elementTexts,
   entryMatchesDocumentUuid,
@@ -19,8 +22,8 @@ import {
   patchPublicatiestatus,
   seedDocument,
 } from '@/bdd/@publicatiebank/support/document'
-import { ENV } from '@/bdd/_core/types'
 import { Given, Then, When } from '@/bdd/_core/fixture'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 
 const SITEMAP_INDEX_PATH = '/api/sitemapindex-diwoo.xml'
@@ -310,10 +313,11 @@ When('I look up its document entry in the sitemaps', async ({ sitemap, scratch }
   scratch.set('sitemap:entry', entry!)
 })
 
-When('I refetch the current month\'s sitemap', async ({ sitemap }) => {
+When('I refetch the current month\'s sitemap', async () => {
+  // Only waits out the output cache. The fetch itself belongs to the paired
+  // Then, which knows whether it is waiting for the document to appear or to
+  // disappear and so can poll for it (see currentMonthEntriesUntil).
   await waitForSitemapCacheExpiry()
-  const now = new Date()
-  await sitemap.get(`/api/sitemap/${now.getFullYear()}/${now.getMonth() + 1}.xml`)
 })
 
 Then('every published document appears in a sitemap', async ({ scratch }) => {
@@ -402,44 +406,57 @@ Then('its sitemap soortHandeling is derived from those dates', async ({ scratch 
   expect(hasAtTime(entry)).toBe(true)
 })
 
-Then('its documents appear in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
+/**
+ * Poll the current month's sitemap until the seeded document reaches
+ * `expected` presence, then assert it — so a slow ODRC→Documenten API
+ * registration costs seconds, not a failure, while a genuinely wrong sitemap
+ * still fails (with the same message it always did).
+ */
+async function expectSeededDocumentPresence(
+  sitemap: SitemapClient,
+  scratch: Map<string, string>,
+  expected: boolean,
+): Promise<string[]> {
   const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  expect(entries.some(e => entryMatchesDocumentUuid(e, uuid))).toBe(true)
+  const present = (entries: string[]) => entries.some(e => entryMatchesDocumentUuid(e, uuid))
+  const entries = await currentMonthEntriesUntil(sitemap, es => present(es) === expected)
+  expect(present(entries), `document ${uuid} present in ${currentMonthSitemapPath()}`).toBe(expected)
+  return entries
+}
+
+Then('its documents appear in the current month\'s sitemap', async ({ sitemap, scratch }) => {
+  await expectSeededDocumentPresence(sitemap, scratch, true)
 })
 
 Then('the added documents appear in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
-  const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  expect(entries.some(e => entryMatchesDocumentUuid(e, uuid))).toBe(true)
+  await expectSeededDocumentPresence(sitemap, scratch, true)
 })
 
 Then('the updated metadata appears in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
   const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  const entry = entries.find(e => entryMatchesDocumentUuid(e, uuid))
-  expect(entry).toBeTruthy()
   const updated = scratch.get('sitemap:updatedOmschrijving')
+  // The document is already published, so presence alone settles immediately —
+  // poll on the updated omschrijving, which is what this scenario is about.
+  const entries = await currentMonthEntriesUntil(sitemap, (es) => {
+    const entry = es.find(e => entryMatchesDocumentUuid(e, uuid))
+    return !!entry && (!updated || elementTextsSafe(entry, 'omschrijving').includes(updated))
+  })
+  const entry = entries.find(e => entryMatchesDocumentUuid(e, uuid))
+  expect(entry, `document ${uuid} present in ${currentMonthSitemapPath()}`).toBeTruthy()
   if (updated)
     expect(elementTextsSafe(entry!, 'omschrijving')).toContain(updated)
 })
 
 Then('the withdrawn document no longer appears in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
-  const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  expect(entries.some(e => entryMatchesDocumentUuid(e, uuid))).toBe(false)
+  await expectSeededDocumentPresence(sitemap, scratch, false)
 })
 
 Then('its documents no longer appear in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
-  const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  expect(entries.some(e => entryMatchesDocumentUuid(e, uuid))).toBe(false)
+  await expectSeededDocumentPresence(sitemap, scratch, false)
 })
 
 Then('the deleted document no longer appears in the current month\'s sitemap', async ({ sitemap, scratch }) => {
-  const entries = urlEntries(sitemap.last().body)
-  const uuid = requireScratch(scratch, 'sitemap:docUuid')
-  expect(entries.some(e => entryMatchesDocumentUuid(e, uuid))).toBe(false)
+  await expectSeededDocumentPresence(sitemap, scratch, false)
 })
 
 function elementTextsSafe(xml: string, name: string): string[] {

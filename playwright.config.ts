@@ -47,8 +47,18 @@ export default defineConfig({
      alone pushed the k8s run past its job timeout without catching anything a
      single retry doesn't. */
   retries: 1,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  /* Opt out of parallel tests on CI.
+
+     Locally, cap instead of letting Playwright pick one worker per core. The
+     whole stack (Elasticsearch + Keycloak + four Django/dotnet apps) shares one
+     Docker VM, and on a small VM unbounded workers × 3 browser projects push the
+     node into swap until the kernel SIGKILLs the publicatiebank (exit 137). That
+     surfaces as failures nowhere near the cause — `POST documenten -> 502`, an
+     admin "Beheermenu" that never renders, beforeEach timeouts — every one of
+     which passes in isolation, so they read as flakes rather than as a starved
+     backend. 4 is safe on an 8 GB VM; raise it only alongside the VM's memory
+     (`docker info --format '{{.MemTotal}}'`). */
+  workers: process.env.CI ? 1 : 4,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI
     ? [['html'], ['github'], ['dot'], ['json', { outputFile: 'playwright-report/results.json' }]]

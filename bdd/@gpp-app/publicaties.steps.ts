@@ -3,7 +3,7 @@ import { expectNoSearchResults, searchPublicatieViaUi } from '@/bdd/@burgerporta
 import { publicationOnderwerpenAdmin, publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
 import { regularState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
-import { expect, request as apiRequest } from '@playwright/test'
+import { request as apiRequest, expect } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
 import { waitForWithReload } from './support/hydrate'
 import {
@@ -15,6 +15,7 @@ import {
   claimButton,
   clickBekijkOnlineViaUi,
   conceptStatusBanner,
+  confirmWrite,
   createAndPublishViaUi,
   DOCUMENT_FIXTURE,
   documentDatumField,
@@ -31,6 +32,7 @@ import {
   openPublicatieViaUi,
   optionGroupError,
   publicatieEigenaar,
+  publicatieListItem,
   saveAsConceptViaUi,
   searchPublicatiesByDateViaUi,
   sortPublicatiesViaUi,
@@ -395,13 +397,21 @@ When('I withdraw the publicatie and confirm the intrekken dialog', async ({ page
   // Unlike withdrawViaUi (which confirms only if a dialog happens to appear),
   // this scenario explicitly verifies the dialog itself before confirming it.
   await expect(intrekkenDialog(page)).toBeVisible()
-  await intrekkenDialog(page).getByRole('button', { name: 'Ja, intrekken' }).click()
+  // Confirm through confirmWrite, not a bare click: the confirm button is
+  // clickable a beat before the app wires its handler, so a plain click is
+  // silently dropped and the publicatie is never withdrawn at all.
+  await confirmWrite(page, 'Ja, intrekken')
 })
 
 Then('the publicatie is shown as ingetrokken in my publicaties list', async ({ page, publications }) => {
   await openMijnPublicaties(page)
-  await expect(page.getByText(publications.last(), { exact: true })).toBeVisible()
-  await expect(page.getByText(/ingetrokken/i).first()).toBeVisible()
+  // Assert the status on this publicatie's own row. A page-wide
+  // getByText(/ingetrokken/i).first() instead resolves to the hidden
+  // <option value="ingetrokken"> of the publicatiestatus *filter*, which precedes
+  // the list in the DOM and never becomes visible.
+  const row = publicatieListItem(page, publications.last())
+  await expect(row).toBeVisible()
+  await expect(row.getByRole('status')).toHaveText(/ingetrokken/i)
 })
 
 Then('the opened publicatie shows the ingetrokken message', async ({ page, publications }) => {

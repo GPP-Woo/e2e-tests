@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { waitForWithReload } from '@/bdd/@gpp-app/support/hydrate'
 import { expect } from '@playwright/test'
 import { Before, Given, test, Then, When } from '../_core/fixture'
@@ -44,6 +45,23 @@ function requireScratch(scratch: Map<string, string>, key: string): string {
   if (!v)
     throw new Error(`Missing scratch ${key} — seed Given/When did not run?`)
   return v
+}
+
+/**
+ * The `<utrecht-article>` of each search hit, scoped to the result list — a bare
+ * `getByRole('article')` also picks up the page's own article wrappers.
+ */
+function searchResults(page: Page) {
+  return page.locator('ol.gpp-woo-search-result-list').getByRole('article')
+}
+
+/**
+ * The result-type label ("Document" / "Publicatie") of each rendered hit — the
+ * one `<strong>` in a hit's metadata list (see SearchResultList.vue).
+ */
+async function resultTypeLabels(page: Page): Promise<string[]> {
+  const labels = await searchResults(page).locator('.gpp-woo-meta-data-list strong').allTextContents()
+  return labels.map(l => l.trim())
 }
 
 Given('the burgerportaal homepage is open', async ({ page }) => {
@@ -360,12 +378,17 @@ When('I filter the search results by type', async ({ page }) => {
 Then('only search results matching the filter remain', async ({ page, scratch }) => {
   const token = requireScratch(scratch, 'zoeken:token')
   await expect(page.getByText(/\d+ resultaten gevonden/)).toBeVisible({ timeout: 20_000 })
-  const articles = page.getByRole('article')
-  await expect(articles.first()).toBeVisible()
-  const count = await articles.count()
-  expect(count).toBeGreaterThan(0)
-  for (let i = 0; i < count; i++)
-    await expect(articles.nth(i).getByText('Document', { exact: true })).toBeVisible()
+  await expect(searchResults(page).first()).toBeVisible()
+  // The list re-renders asynchronously after the filter round-trip, so counting
+  // articles up front can snapshot the *pre-filter* list and read a Publicatie
+  // that is on its way out. Poll the rendered type labels instead: an empty list
+  // or a lingering non-Document label both fail, and the failure names them.
+  await expect
+    .poll(async () => Array.from(new Set(await resultTypeLabels(page))), {
+      timeout: 20_000,
+      message: 'only Document results remain after filtering by type',
+    })
+    .toEqual(['Document'])
   // Seeded document must still be among the filtered hits.
   await expect(page.getByRole('link', { name: requireScratch(scratch, 'zoeken:docTitel') })).toBeVisible()
   const api = await postZoeken({ query: token, resultTypes: ['document'] })

@@ -132,7 +132,7 @@ intact and ready, for a future flow where the DOM genuinely is not addressable:
 
 - [`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts) — the
   [OpenRouter](https://openrouter.ai) client, the role × tier model table, and
-  the CDP attach that makes Stagehand adopt the *same* page Playwright traces.
+  the CDP attach that makes Stagehand adopt the _same_ page Playwright traces.
 - The `stagehand` / `adminStagehand` fixtures in
   [`bdd/_core/core-fixtures.ts`](./bdd/_core/core-fixtures.ts). A Playwright
   fixture is only built when a step destructures it, so these cost nothing while

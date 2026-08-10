@@ -1,11 +1,13 @@
 import type { Page } from '@playwright/test'
+import type { Buffer } from 'node:buffer'
+import process from 'node:process'
 import { waitForWithReload } from '@/bdd/@gpp-app/support/hydrate'
-import { ENV } from '@/bdd/_core/types'
 import {
   activateLandelijkeOrganisatie,
   seedDocument,
 } from '@/bdd/@publicatiebank/support/document'
-import { expect, request as apiRequest } from '@playwright/test'
+import { ENV } from '@/bdd/_core/types'
+import { request as apiRequest, expect } from '@playwright/test'
 
 /**
  * Reusable burgerportaal full-text search helpers, for scenarios outside
@@ -92,7 +94,7 @@ export async function expectNoSearchResults(page: Page): Promise<void> {
   await expect(page.getByText('Geen resultaten gevonden.')).toBeVisible({ timeout: 20_000 })
 }
 
-export type ZoekenHit = {
+export interface ZoekenHit {
   type: string
   record: {
     uuid: string
@@ -104,7 +106,7 @@ export type ZoekenHit = {
   }
 }
 
-export type ZoekenResponse = {
+export interface ZoekenResponse {
   count: number
   previous: boolean
   next: boolean
@@ -180,7 +182,7 @@ export async function topicUuidByTitel(titel: string): Promise<string> {
   }
 }
 
-type Tracked = {
+interface Tracked {
   freshName: () => string
   track: (titel: string) => string
 }

@@ -19,6 +19,8 @@ import { Given, Then, When } from '../../_core/fixture'
  */
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
+/** Name prefix every scenario's throwaway organisaties carry (see @publicatiebank/fixtures.ts). */
+const FIXTURE_PREFIX = 'E2E '
 
 /**
  * A random but *valid* RSIN. The admin form validates the 9 digits with the
@@ -163,8 +165,22 @@ Then('the organisaties are listed in alphabetical order by name', async ({ page 
 
 // --- Filter (right-side "actief" filter under test) ------------------------
 
-When('I filter the organisatie changelist on active organisaties', async ({ page }) => {
+/**
+ * Click the changelist's "Actief: Ja" filter and wait for the filtered page.
+ *
+ * The Django filter is an ordinary link, so clicking it is a full navigation:
+ * reading `th.field-naam a` straight afterwards can land mid-load and come back
+ * with an empty list. Wait for the URL the filter sets *and* for the first row,
+ * so the read only happens once the filtered changelist is really rendered.
+ */
+async function filterOnActieveOrganisaties(page: Page) {
   await page.locator('#changelist-filter').getByRole('link', { name: 'Ja', exact: true }).click()
+  await page.waitForURL(/is_actief__exact=1/)
+  await page.locator('th.field-naam a').first().waitFor()
+}
+
+When('I filter the organisatie changelist on active organisaties', async ({ page }) => {
+  await filterOnActieveOrganisaties(page)
 })
 
 Then('only active organisaties are shown in the results', async ({ page, organisations }) => {
@@ -184,19 +200,28 @@ Then('only active organisaties are shown in the results', async ({ page, organis
 // --- Cross-application: publicatiebank vs GPP-app waardelijst ---------------
 
 When('I list the active organisaties in the admin', async ({ page, scratch }) => {
-  await page.locator('#changelist-filter').getByRole('link', { name: 'Ja', exact: true }).click()
+  await filterOnActieveOrganisaties(page)
   const names = (await page.locator('th.field-naam a').allTextContents()).map(n => n.trim())
   scratch.set('org:activeNames', JSON.stringify(names))
 })
 
-Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async ({ scratch }) => {
+Then('the same organisaties are available in the GPP-app gebruikersgroep waardelijst', async ({ organisations, scratch }) => {
   const names: string[] = JSON.parse(scratch.get('org:activeNames') ?? '[]')
   expect(names.length).toBeGreaterThan(0)
+  const mine = organisations.last()
+  expect(names, 'the organisatie this scenario activated is listed as active').toContain(mine)
+  // Assert this scenario's own organisatie plus the stable (non-fixture) ones.
+  // Every other `E2E `-prefixed name in the snapshot belongs to a *different*
+  // worker, which creates and deletes its organisaties throughout the run — so
+  // the admin list can name one that is already gone by the time the gpp-app is
+  // asked, failing on a row this scenario neither owns nor controls. Skipping
+  // those keeps the cross-application claim and drops the cross-worker race.
+  const checked = names.filter(naam => naam === mine || !naam.startsWith(FIXTURE_PREFIX))
   // Session-authenticated gpp-app (odpc) API context — same pattern the
   // authProfile fixture (@gpp-app/fixtures.ts) uses to resolve organisatie uuids.
   const ctx = await apiRequest.newContext({ storageState: adminState })
   try {
-    for (const naam of names)
+    for (const naam of checked)
       await expect(resolveOrganisatieUuid(ctx, naam)).resolves.toBeTruthy()
   }
   finally {
@@ -215,7 +240,8 @@ When('I open the organisatie logs via {string}', async ({ page, organisations },
   // carries the organisatie's identifier as an (external) link, so an index
   // silently lands on that instead.
   await page.getByRole('row', { name: organisations.last() })
-    .getByRole('link', { name: 'Toon logs' }).click()
+    .getByRole('link', { name: 'Toon logs' })
+    .click()
 })
 
 Then('the edit is recorded in the organisatie logs', async ({ page, organisations }) => {
