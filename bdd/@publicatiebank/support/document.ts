@@ -200,3 +200,39 @@ export function deleteDocumentByTitel(page: Page, titel: string) {
 export function listE2EDocumentTitels(page: Page, prefix = 'E2E '): Promise<string[]> {
   return resource.listE2ENames(page, prefix)
 }
+
+/**
+ * The UUID of a document, read from the change form's readonly uuid field. The
+ * burgerportaal serves a document at `/documenten/<uuid>`, so scenarios that
+ * assert portal visibility stash this before a withdraw/delete. '' if not found.
+ */
+export async function documentUuidAdmin(page: Page, titel: string): Promise<string> {
+  if (!(await resource.open(page, titel)))
+    return ''
+  const text = await page.locator('.form-row.field-uuid .readonly, .field-uuid .readonly').textContent()
+  return (text ?? '').trim()
+}
+
+/**
+ * Whether the change form of a document exposes no way to edit it.
+ * `DocumentAdmin.has_change_permission` returns False for an `ingetrokken`
+ * document, so Django falls back to its view-only change form.
+ */
+export async function documentFormIsReadOnly(page: Page, titel: string): Promise<boolean> {
+  if (!(await resource.open(page, titel)))
+    return false
+  return (await page.locator('input[name="_save"]').count()) === 0
+    && (await page.locator('#id_officiele_titel').count()) === 0
+}
+
+/**
+ * Open the document's "Toon logs" view from the changelist (the logging
+ * changelist filtered to this object's content type + pk).
+ */
+export async function openDocumentLogsAdmin(page: Page, titel: string): Promise<void> {
+  await page.goto(`${resource.changelistUrl()}?q=${encodeURIComponent(titel)}`)
+  const row = page.getByRole('row', { name: titel })
+  if ((await row.count()) === 0)
+    throw new Error(`Document "${titel}" not found in the admin changelist`)
+  await row.first().getByRole('link', { name: 'Toon logs' }).click()
+}

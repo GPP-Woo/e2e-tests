@@ -14,6 +14,11 @@ import { test as setup } from '@playwright/test'
  * establishes a realm-wide SSO session; signing into the publicatiebank admin
  * then piggybacks on that session, so a *second* one-time code is never needed.
  */
+// A rejected one-time code (a re-run inside the same 30s TOTP window reuses it)
+// makes the login wait for the next window before retrying, which alone eats the
+// 30s default.
+setup.setTimeout(120_000)
+
 setup('authenticate as admin', async ({ page }) => {
   await signIn(page, 'gppApp', ENV.users.admin)
   await signIn(page, 'publicatiebank', ENV.users.admin)

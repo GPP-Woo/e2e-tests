@@ -26,6 +26,13 @@ import { addTopic, deleteTopicByName } from './support/topic'
 export interface CategoryManager {
   /** Create a uniquely-named self-added category; returns its name. */
   add: (naam?: string) => Promise<string>
+  /**
+   * Register a name created some other way (e.g. through the admin form under
+   * test) so teardown deletes it too. Returns the name.
+   */
+  track: (naam: string) => string
+  /** A fresh unique `E2E …` name, without creating anything. */
+  freshName: () => string
   /** Name of the most recently added category (throws if none). */
   last: () => string
 }

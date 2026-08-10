@@ -1,4 +1,15 @@
-import { documentExistsAdmin, documentStatusAdmin, openDocumentAdmin, seedPublishedDocument } from '@/bdd/@publicatiebank/support/document'
+import type { Page } from '@playwright/test'
+import { auditEntryCount, newestAuditEntryText } from '@/bdd/@publicatiebank/support/audit-log'
+import {
+  documentExistsAdmin,
+  documentFormIsReadOnly,
+  documentStatusAdmin,
+  documentUuidAdmin,
+  openDocumentAdmin,
+  openDocumentLogsAdmin,
+  seedPublishedDocument,
+} from '@/bdd/@publicatiebank/support/document'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
@@ -12,6 +23,18 @@ import { Given, Then, When } from '../../_core/fixture'
  */
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
+// The burgerportaal renders a document from a live API call to the
+// publicatiebank, but it is an SPA behind a proxy — allow a few seconds and a
+// reload, as the publicatie burgerportaal scenarios do.
+const LIVE = { timeout: 30_000, intervals: [1000, 2000, 3000] }
+const burg = ENV.apps.burgerportaal.replace(/\/$/, '')
+
+/** Body text of the burgerportaal detail page of the document under test. */
+async function burgerportaalDocumentText(page: Page, uuid: string): Promise<string | null> {
+  await page.goto(`${burg}/documenten/${uuid}`)
+  await page.waitForLoadState('networkidle').catch(() => {})
+  return page.locator('body').textContent()
+}
 
 // Prerequisite (deterministic, not the action under test): a gepubliceerd
 // publicatie owning a gepubliceerd document with real uploaded content. Seeded
@@ -52,110 +75,168 @@ Then('the document no longer exists', async ({ page, documents }) => {
   await expect.poll(() => documentExistsAdmin(page, documents.last()), READ).toBe(false)
 })
 
-// === @todo — TS8 coverage gaps =============================================
-// New scenarios below are @todo (skipped by the global Before hook in
-// _core/todo.steps.ts). Bodies throw until implemented; each comment notes the
-// intended implementation.
-
 // --- Search (UI read under test) -------------------------------------------
 
-When('I search the admin for the document', async () => {
-  // Drive the changelist search box: await docAdmin.search(documents.last()).
-  throw new Error('TODO: run docAdmin.search(documents.last()) on the document changelist')
+When('I search the admin for the document', async ({ docAdmin, documents }) => {
+  await docAdmin.search(documents.last())
 })
 
-Then('the document is shown in the admin results', async () => {
-  // Confirm deterministically via documentExistsAdmin(page, documents.last()) === true.
-  throw new Error('TODO: assert documentExistsAdmin(page, documents.last()) is true')
+Then('the document is shown in the admin results', async ({ page, documents }) => {
+  expect(await documentExistsAdmin(page, documents.last())).toBe(true)
 })
 
 // --- Edit metadata ----------------------------------------------------------
 
-When('I edit the document metadata through the admin', async () => {
-  // openDocumentAdmin(page, documents.last()); fill #id_officiele_titel /
-  // #id_verkorte_titel / #id_omschrijving with fresh values; docAdmin.save().
-  // Store the new officiële titel in scratch (documents.track it) for the assertion.
-  throw new Error('TODO: open the document change page, edit its metadata fields via the form fields, save, and stash the new titel in scratch')
+When('I edit the document metadata through the admin', async ({ page, docAdmin, documents, scratch }) => {
+  const oldTitel = documents.last()
+  const newTitel = `${documents.freshName()} hernoemd`
+  const verkorte = `E2E verkort ${Date.now()}`
+  const omschrijving = `E2E omschrijving ${Date.now()}`
+  // Stash uuid while the document still exists under its old titel — needed by
+  // the burgerportaal assertion after the rename.
+  const uuid = await documentUuidAdmin(page, oldTitel)
+  if (!uuid)
+    throw new Error(`Document "${oldTitel}" has no uuid on the change form`)
+  scratch.set('doc:uuid', uuid)
+  scratch.set('doc:officiele_titel', newTitel)
+  scratch.set('doc:verkorte_titel', verkorte)
+  scratch.set('doc:omschrijving', omschrijving)
+  await openDocumentAdmin(page, oldTitel)
+  await page.locator('#id_officiele_titel').fill(newTitel)
+  await page.locator('#id_verkorte_titel').fill(verkorte)
+  await page.locator('#id_omschrijving').fill(omschrijving)
+  await docAdmin.save()
+  // Track the new titel so cleanup deletes the renamed document too.
+  documents.track(newTitel)
 })
 
-Then('the document shows the edited metadata when reopened', async () => {
-  // Reopen the change page and poll the field values (read through the session page)
-  // against the values stashed in scratch by the edit step.
-  throw new Error('TODO: reopen the document and assert its fields match the edited values from scratch')
+Then('the document shows the edited metadata when reopened', async ({ page, documents, scratch }) => {
+  const titel = scratch.get('doc:officiele_titel') ?? documents.last()
+  const verkorte = scratch.get('doc:verkorte_titel')!
+  const omschrijving = scratch.get('doc:omschrijving')!
+  await expect.poll(async () => {
+    if (!(await documentExistsAdmin(page, titel)))
+      return ''
+    await openDocumentAdmin(page, titel)
+    return page.locator('#id_officiele_titel').inputValue()
+  }, READ).toBe(titel)
+  await expect(page.locator('#id_verkorte_titel')).toHaveValue(verkorte)
+  await expect(page.locator('#id_omschrijving')).toHaveValue(omschrijving)
 })
 
 // --- Edit kenmerken ---------------------------------------------------------
 
-When('I edit the document kenmerken through the admin', async () => {
-  // openDocumentAdmin(page, documents.last()); add/change/remove a kenmerk in the
-  // inline rows (bron + kenmerk); docAdmin.save(); stash the value in scratch.
-  throw new Error('TODO: open the document, add/change/remove a kenmerk in the inline rows, save, and stash the kenmerk in scratch')
+When('I edit the document kenmerken through the admin', async ({ page, docAdmin, documents, scratch }) => {
+  const kenmerk = `E2E kenmerk ${Date.now()}`
+  const bron = 'E2E bron'
+  scratch.set('doc:kenmerk', kenmerk)
+  await openDocumentAdmin(page, documents.last())
+  // Kenmerken are a DocumentIdentifier inline with `extra = 0`, so an existing
+  // document without identifiers renders no empty row to fill.
+  const first = page.locator('#id_documentidentifier_set-0-kenmerk')
+  if ((await first.count()) === 0)
+    await page.locator('#documentidentifier_set-group .add-row a').click()
+  await page.locator('#id_documentidentifier_set-0-kenmerk').fill(kenmerk)
+  await page.locator('#id_documentidentifier_set-0-bron').fill(bron)
+  await docAdmin.save()
 })
 
-Then('the document shows the edited kenmerken when reopened', async () => {
-  // Reopen the change page and assert the kenmerk inline rows match scratch.
-  throw new Error('TODO: reopen the document and assert its kenmerken match the value stashed in scratch')
+Then('the document shows the edited kenmerken when reopened', async ({ page, documents, scratch }) => {
+  const expected = scratch.get('doc:kenmerk')!
+  await expect.poll(async () => {
+    await openDocumentAdmin(page, documents.last())
+    return page.locator('#id_documentidentifier_set-0-kenmerk').inputValue()
+  }, READ).toBe(expected)
 })
 
 // --- Logs (Toon logs / audit) ----------------------------------------------
 
-When('I open the document logs through the admin', async () => {
-  // Navigate to the document's "Toon logs" view (the logging changelist filtered to
-  // this object) through the session page, e.g. via a logs helper in support/document.ts.
-  throw new Error('TODO: open the document logging view for documents.last() through the admin')
+When('I open the document logs through the admin', async ({ page, documents }) => {
+  await openDocumentLogsAdmin(page, documents.last())
 })
 
-Then('the document logs list the document', async () => {
-  // Assert the logging changelist contains an entry referencing documents.last().
-  throw new Error('TODO: assert the logging list contains a row for documents.last()')
+Then('the document logs list the document', async ({ page, documents }) => {
+  const titel = documents.last()
+  await expect(page.getByRole('row').filter({ hasText: titel }).first()).toBeVisible()
 })
 
 // --- Burgerportaal verification --------------------------------------------
 
-Then('the edited metadata is visible in the Burgerportaal', async () => {
-  // Fetch the burgerportaal sitemap/detail for the document and assert the edited
-  // titel from scratch appears in the public body (sitemap.get(...) then check body).
-  throw new Error('TODO: fetch the burgerportaal resource and assert it shows the edited titel from scratch')
+Then('the edited metadata is visible in the Burgerportaal', async ({ page, scratch }) => {
+  const uuid = scratch.get('doc:uuid')!
+  const titel = scratch.get('doc:officiele_titel')!
+  await expect.poll(() => burgerportaalDocumentText(page, uuid), LIVE).toContain(titel)
 })
 
-Then('the document is no longer visible in the Burgerportaal', async () => {
-  // Fetch the burgerportaal sitemap and assert documents.last() is absent from the body.
-  throw new Error('TODO: fetch the burgerportaal sitemap and assert documents.last() is no longer listed')
+Then('the document is no longer visible in the Burgerportaal', async ({ page, documents, scratch }) => {
+  // Prefer a uuid stashed earlier; otherwise read it from the (still present)
+  // withdrawn document's change form.
+  let uuid = scratch.get('doc:uuid')
+  if (!uuid) {
+    uuid = await documentUuidAdmin(page, documents.last())
+    if (!uuid)
+      throw new Error(`Document "${documents.last()}" has no uuid on the change form`)
+    scratch.set('doc:uuid', uuid)
+  }
+  // A withdrawn document 404s on the burgerportaal API (non-gepubliceerd), which
+  // the portal renders as its "niet (meer) beschikbaar" alert.
+  await expect.poll(() => burgerportaalDocumentText(page, uuid!), LIVE).toContain('niet (meer) beschikbaar')
 })
 
 // --- Read-only after withdraw ----------------------------------------------
 
-Then('the document can no longer be edited', async () => {
-  // Reopen the change page for the ingetrokken document and assert its fields are
-  // read-only / disabled (e.g. #id_officiele_titel is readonly or the save button is absent).
-  throw new Error('TODO: reopen the withdrawn document and assert its fields are read-only')
+Then('the document can no longer be edited', async ({ page, documents }) => {
+  await expect.poll(() => documentFormIsReadOnly(page, documents.last()), READ).toBe(true)
 })
 
 // --- Audit log after withdraw / delete -------------------------------------
 
-Then('the withdrawal is recorded in the audit log', async () => {
-  // Open the (audit)logitems changelist, search documents.last(), assert an entry
-  // recording the status change to ingetrokken is present.
-  throw new Error('TODO: assert the audit log contains a withdrawal entry for documents.last()')
+Then('the withdrawal is recorded in the audit log', async ({ page, documents }) => {
+  // A withdrawal is an update whose snapshot carries the new publicatiestatus.
+  await expect.poll(() => newestAuditEntryText(page, documents.last(), 'update'), READ).toContain('ingetrokken')
 })
 
-Then('the deletion is recorded in the audit log', async () => {
-  // Open the (audit)logitems changelist, search documents.last(), assert a deletion
-  // entry is present (reads through the session page after docAdmin deleted the row).
-  throw new Error('TODO: assert the audit log contains a deletion entry for documents.last()')
+Then('the deletion is recorded in the audit log', async ({ page, documents }) => {
+  // The titel survives the deletion in the entry's cached object repr, which is
+  // exactly what the admin search matches on.
+  await expect.poll(() => auditEntryCount(page, documents.last(), 'delete'), READ).toBeGreaterThan(0)
 })
 
 // --- Edit / delete from within the publication -----------------------------
+//
+// DocumentInlineAdmin is read-only (no editable fields, can_delete=False). The
+// inline exposes a title link to the document change page and a Verwijderen
+// link to the document delete confirmation — that is the "from within its
+// publication" entry point under test.
 
-When('I edit the document from within its publication through the admin', async () => {
-  // Open the publications.last() change page, scroll to the document inline, edit its
-  // titel/omschrijving on the inline form, save; stash the new titel in scratch for reuse
-  // by "the document shows the edited metadata when reopened".
-  throw new Error('TODO: edit the document inline on the publicatie change page via the form fields, save, and stash the new titel in scratch')
+When('I edit the document from within its publication through the admin', async ({ page, pubAdmin, docAdmin, publications, documents, scratch }) => {
+  const oldTitel = documents.last()
+  const newTitel = `${documents.freshName()} via-pub`
+  const verkorte = `E2E verkort ${Date.now()}`
+  const omschrijving = `E2E omschrijving ${Date.now()}`
+  scratch.set('doc:officiele_titel', newTitel)
+  scratch.set('doc:verkorte_titel', verkorte)
+  scratch.set('doc:omschrijving', omschrijving)
+  await pubAdmin.open(publications.last())
+  await page.locator('#document_set-group').getByRole('link', { name: oldTitel }).click()
+  await page.locator('#id_officiele_titel').fill(newTitel)
+  await page.locator('#id_verkorte_titel').fill(verkorte)
+  await page.locator('#id_omschrijving').fill(omschrijving)
+  await docAdmin.save()
+  documents.track(newTitel)
 })
 
-When('I delete the document from within its publication through the admin', async () => {
-  // Open the publications.last() change page, tick the document inline "Verwijderen"
-  // checkbox, and docAdmin.save().
-  throw new Error('TODO: tick the document inline "Verwijderen" checkbox on the publicatie change page and save')
+When('I delete the document from within its publication through the admin', async ({ page, pubAdmin, publications, documents }) => {
+  const titel = documents.last()
+  await pubAdmin.open(publications.last())
+  // The inline Delete link uses target="_blank"; follow its href in-tab so the
+  // confirmation stays on the same Playwright page.
+  const href = await page.locator('#document_set-group')
+    .getByRole('row', { name: titel })
+    .getByRole('link', { name: 'Verwijderen' })
+    .getAttribute('href')
+  if (!href)
+    throw new Error(`No Verwijderen link for document "${titel}" in the publication inline`)
+  await page.goto(new URL(href, ENV.apps.publicatiebank).href)
+  await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
 })

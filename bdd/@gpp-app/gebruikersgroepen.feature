@@ -15,7 +15,12 @@
 # fetches through the same service token that intermittently 500s under load
 # (see README "Known server flake") and are not exposed on the group list API, so
 # they are not asserted here.
-@admin @timeout:120000
+#
+# @no-webkit — the gpp-app SPA never boots in WebKit on this stack: the app
+# serves `Content-Security-Policy: upgrade-insecure-requests`, and unlike
+# Chromium/Firefox WebKit applies that to http://localhost too, so every asset
+# request is upgraded to https and fails the TLS handshake.
+@admin @timeout:120000 @no-webkit
 Feature: Gebruikersgroepen beheren in de GPP-app
   As functioneel beheer
   I want to create, rename and delete gebruikersgroepen

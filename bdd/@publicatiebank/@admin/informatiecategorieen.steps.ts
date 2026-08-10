@@ -1,7 +1,12 @@
 import type { Page } from '@playwright/test'
+import { auditEntryCount } from '@/bdd/@publicatiebank/support/audit-log'
+import { addSelfAddedCategory } from '@/bdd/@publicatiebank/support/information-category'
 import { openAdminSection, openBeheer } from '@/bdd/@publicatiebank/support/login'
 import { Given, Then, When } from '@/bdd/_core/fixture'
+import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
+
+const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
 
 function stripWs(s: string) {
   return s.replace(/\s+/g, '')
@@ -112,134 +117,143 @@ Then('the information categories are listed alphabetically by name', async ({ pa
 })
 
 // ---------------------------------------------------------------------------
-// TS2 gap coverage (@todo — skipped by the global Before({tags:'@todo'}) hook).
-// Stubs only; the phrasing is registered so bddgen stays green. Prerequisite
-// steps (Background, "I filter on", "I search for", "I open the self-added")
-// are reused verbatim from above.
+// TS2 gap coverage — prerequisite steps (Background, "I filter on", "I search
+// for", "I open the self-added") are reused from above.
 // ---------------------------------------------------------------------------
+
+function formRow(page: Page, label: string) {
+  return page.locator('.form-row').filter({ has: page.locator('label', { hasText: label }) })
+}
 
 // --- Default catalogue present + coexistence (admin read via `page`) --------
 
-Then('all 18 default information categories from the landelijke waardelijst are present', async () => {
-  // Admin read: after filtering on "Waardelijst", count `td.field-oorsprong`
-  // rows and expect 18 (17 statutory + 1 inspanningsverplichting).
-  throw new Error('TODO: assert exactly 18 Waardelijst rows in the changelist')
+Then('all 18 default information categories from the landelijke waardelijst are present', async ({ page }) => {
+  await expect(page.locator('td.field-oorsprong')).toHaveCount(18)
 })
 
-Then('both the default categories and my self-added category are listed', async () => {
-  // Admin read: on the "Alle" filter, assert >= 18 Waardelijst rows exist AND
-  // categories.last() is present, proving default + self-added coexist.
-  throw new Error('TODO: assert the default list and categories.last() coexist')
+Then('both the default categories and my self-added category are listed', async ({ page, categories }) => {
+  const waardelijst = page.locator('td.field-oorsprong').filter({ hasText: 'Waardelijst' })
+  expect(await waardelijst.count()).toBeGreaterThanOrEqual(18)
+  await expect(page.getByRole('link', { name: categories.last(), exact: true })).toBeVisible()
 })
 
 // --- Add through the UI (mutation via the admin form on `page`) -------------
 
-When('I add an information category through the admin form', async () => {
-  // Mutation: reuse addSelfAddedCategory(page, categories.freshName()) but drive
-  // it as the action under test, then categories.track(name) for teardown.
-  throw new Error('TODO: fill and submit the informatiecategorie add form, then track the name')
+When('I add an information category through the admin form', async ({ page, categories }) => {
+  const naam = categories.freshName()
+  await addSelfAddedCategory(page, naam)
+  categories.track(naam)
 })
 
-Then('the new information category is listed on the overview', async () => {
-  // Admin read: search the changelist for categories.last() and expect one row.
-  throw new Error('TODO: assert categories.last() appears once on the overview')
+Then('the new information category is listed on the overview', async ({ page, categories }) => {
+  await search(page, categories.last())
+  await expect(page.getByRole('link', { name: categories.last(), exact: true })).toHaveCount(1)
 })
 
 // --- Restricted fields on a Waardelijst category (admin read) ---------------
 
-When('I open a Waardelijst information category', async () => {
-  // Navigate: filter on "Waardelijst" and open the first row's change page.
-  throw new Error('TODO: open the change page of the first Waardelijst category')
+When('I open a Waardelijst information category', async ({ page }) => {
+  await page.getByRole('link', { name: 'Waardelijst', exact: true }).click()
+  await page.locator('td.field-oorsprong').first().waitFor()
+  await page.locator('th.field-naam a').first().click()
+  await expect(page).toHaveURL(/\/admin\/metadata\/informationcategory\/\d+\/change\//)
 })
 
-Then('only the omschrijving and archivering fields are editable', async () => {
-  // Admin read: assert #id_omschrijving and the bewaartermijn/archivering inputs
-  // are enabled (not readonly/disabled).
-  throw new Error('TODO: assert omschrijving and archivering fields are editable')
+Then('only the omschrijving and archivering fields are editable', async ({ page }) => {
+  await expect(page.locator('#id_omschrijving')).toBeEditable()
+  await expect(page.locator('#id_bron_bewaartermijn')).toBeEditable()
+  await expect(page.locator('#id_bewaartermijn')).toBeEditable()
+  await expect(page.locator('#id_archiefnominatie')).toBeEnabled()
 })
 
-Then('the oorsprong, identificatie and UUID fields are read-only', async () => {
-  // Admin read: assert the oorsprong, identificatie and UUID fields render as
-  // read-only (.readonly div, or disabled inputs) for a Waardelijst category.
-  throw new Error('TODO: assert oorsprong, identificatie and UUID are read-only')
+Then('the oorsprong, identificatie and UUID fields are read-only', async ({ page }) => {
+  await expect(formRow(page, 'Oorsprong:').locator('.readonly')).toBeVisible()
+  await expect(formRow(page, 'Identificatie:').locator('.readonly')).toBeVisible()
+  await expect(formRow(page, 'UUID:').locator('.readonly')).toBeVisible()
 })
 
 // --- Edit a self-added category (mutation via admin form on `page`) ---------
 
-When('I change its omschrijving and save the information category', async ({ scratch }) => {
-  // Mutation: replace #id_omschrijving with a fresh value, remember it via
-  // scratch.set('cat:omschrijving', value), then click _save.
-  scratch.set('cat:omschrijving', `E2E gewijzigd ${Date.now()}`)
-  throw new Error('TODO: edit #id_omschrijving to scratch value and save')
+When('I change its omschrijving and save the information category', async ({ page, scratch }) => {
+  const value = `E2E gewijzigd ${Date.now()}`
+  scratch.set('cat:omschrijving', value)
+  await page.locator('#id_omschrijving').fill(value)
+  await page.locator('input[name="_save"]').click()
 })
 
-Then('the updated omschrijving is shown on the change page', async ({ scratch }) => {
-  // Admin read: reopen the change page and assert #id_omschrijving equals the
-  // value stored in scratch.get('cat:omschrijving').
-  scratch.get('cat:omschrijving')
-  throw new Error('TODO: assert #id_omschrijving equals the saved value')
+Then('the updated omschrijving is shown on the change page', async ({ page, categories, scratch }) => {
+  const expected = scratch.get('cat:omschrijving')!
+  await search(page, categories.last())
+  await page.getByRole('link', { name: categories.last(), exact: true }).click()
+  await assertOnChangePage(page, categories.last())
+  await expect(page.locator('#id_omschrijving')).toHaveValue(expected)
 })
 
 // --- Logging after edit ("Toon logs") ---------------------------------------
 
-Given('I have changed the omschrijving of the self-added information category', async () => {
-  // Prerequisite mutation: open categories.last() and save a changed
-  // omschrijving so there is an edit entry to find in the logs.
-  throw new Error('TODO: open categories.last() and save a changed omschrijving')
+Given('I have changed the omschrijving of the self-added information category', async ({ page, categories, scratch }) => {
+  const value = `E2E gewijzigd ${Date.now()}`
+  scratch.set('cat:omschrijving', value)
+  await search(page, categories.last())
+  await page.getByRole('link', { name: categories.last(), exact: true }).click()
+  await assertOnChangePage(page, categories.last())
+  await page.locator('#id_omschrijving').fill(value)
+  // Stay on the change page so the next step can open "Toon logs" from here.
+  await page.locator('input[name="_continue"]').click()
+  await assertOnChangePage(page, categories.last())
 })
 
-When('I open the {string} view from the change page', async ({}, linkName: string) => {
-  // Navigate: click the "Toon logs" button (linkName) on the category change
-  // page to reach its logging view.
-  throw new Error(`TODO: click the "${linkName}" button on the change page`)
+When('I open the {string} view from the change page', async ({ page }, linkName: string) => {
+  await page.getByRole('link', { name: linkName }).click()
 })
 
-Then('the omschrijving change is listed in the category logs', async () => {
-  // Admin read: assert the logs table shows a "gewijzigd"/wijziging entry for
-  // categories.last().
-  throw new Error('TODO: assert a wijziging log entry exists for the category')
+Then('the omschrijving change is listed in the category logs', async ({ page, categories, scratch }) => {
+  const expected = scratch.get('cat:omschrijving')!
+  const row = page.getByRole('row').filter({ hasText: 'Record bijgewerkt' }).first()
+  await expect(row).toBeVisible()
+  await expect(row).toContainText(categories.last())
+  await row.getByRole('link').first().click()
+  await expect(page.getByText(expected).first()).toBeVisible()
 })
 
 // --- Delete through the UI with confirmation --------------------------------
 
-When('I start deleting the information category', async () => {
-  // Navigate: on the category change page, click the red "verwijderen" link to
-  // reach Django's delete-confirmation page (no confirm yet).
-  throw new Error('TODO: click the "verwijderen" link to open the confirmation page')
+When('I start deleting the information category', async ({ page }) => {
+  await page.getByRole('link', { name: 'Verwijderen' }).click()
 })
 
-Then('a confirmation page lists the consequences of the deletion', async () => {
-  // Admin read: assert the delete-confirmation page shows the "Weet u het zeker"
-  // summary of related objects that would be removed.
-  throw new Error('TODO: assert the delete-confirmation consequences are shown')
+Then('a confirmation page lists the consequences of the deletion', async ({ page, categories }) => {
+  await expect(page.getByText(/Weet u zeker/i)).toBeVisible()
+  await expect(page.locator('#content')).toContainText(categories.last())
+  await expect(page.getByRole('button', { name: /Ja, ik weet het zeker/i })).toBeVisible()
 })
 
-When('I confirm the deletion', async () => {
-  // Mutation: click the confirmation submit button ("Ja, ik weet het zeker").
-  throw new Error('TODO: submit the delete confirmation form')
+When('I confirm the deletion', async ({ page }) => {
+  await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
+  await expect(page).toHaveURL(/\/admin\/metadata\/informationcategory\/(?:\?.*)?$/)
 })
 
-Then('the information category is no longer listed on the overview', async () => {
-  // Admin read: search the changelist for categories.last() and expect no rows.
-  throw new Error('TODO: assert categories.last() is absent from the overview')
+Then('the information category is no longer listed on the overview', async ({ page, categories }) => {
+  await search(page, categories.last())
+  await expect(page.getByRole('link', { name: categories.last(), exact: true })).toHaveCount(0)
 })
 
 // --- Audit log after delete --------------------------------------------------
 
-Given('I have deleted the self-added information category through the UI', async () => {
-  // Prerequisite mutation: delete categories.last() via the admin delete flow so
-  // there is a deletion entry to find in the audit log.
-  throw new Error('TODO: delete categories.last() through the admin UI')
+Given('I have deleted the self-added information category through the UI', async ({ page, categories }) => {
+  await search(page, categories.last())
+  await page.getByRole('link', { name: categories.last(), exact: true }).click()
+  await assertOnChangePage(page, categories.last())
+  await page.getByRole('link', { name: 'Verwijderen' }).click()
+  await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
+  await expect(page).toHaveURL(/\/admin\/metadata\/informationcategory\/(?:\?.*)?$/)
 })
 
-When('I open the {string} via the {string} tab', async ({}, section: string, tab: string) => {
-  // Navigate: open the top "Logging" tab (tab) and its "(audit)logitems"
-  // changelist (section).
-  throw new Error(`TODO: open "${section}" under the "${tab}" tab`)
+When('I open the {string} via the {string} tab', async ({ page }, section: string, tab: string) => {
+  await page.goto(new URL('/admin/', ENV.apps.publicatiebank).href)
+  await openAdminSection(page, tab, section)
 })
 
-Then('the deletion of the information category is recorded in the audit log', async () => {
-  // Admin read: search the audit log for categories.last() and assert a
-  // verwijderd/deletion entry exists.
-  throw new Error('TODO: assert a deletion audit-log entry exists for the category')
+Then('the deletion of the information category is recorded in the audit log', async ({ page, categories }) => {
+  await expect.poll(() => auditEntryCount(page, categories.last(), 'delete'), READ).toBeGreaterThan(0)
 })

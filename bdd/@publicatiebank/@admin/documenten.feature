@@ -30,67 +30,56 @@ Feature: Document beheer in de GPP-publicatiebank
     When I delete the document through the admin
     Then the document no longer exists
 
-  @todo
   Scenario: Search for a document in the admin
     Given a published document
     When I search the admin for the document
     Then the document is shown in the admin results
 
-  @todo
   Scenario: Edit a document's metadata
     Given a published document
     When I edit the document metadata through the admin
     Then the document shows the edited metadata when reopened
 
-  @todo
   Scenario: Edit a document's kenmerken
     Given a published document
     When I edit the document kenmerken through the admin
     Then the document shows the edited kenmerken when reopened
 
-  @todo
   Scenario: View a document's logs
     Given a published document
     When I open the document logs through the admin
     Then the document logs list the document
 
-  @todo
   Scenario: Edited document metadata is visible in the Burgerportaal
     Given a published document
     When I edit the document metadata through the admin
     Then the edited metadata is visible in the Burgerportaal
 
-  @todo
   Scenario: A withdrawn document is read-only
     Given a published document
     When I withdraw the document through the admin
     Then the document can no longer be edited
 
-  @todo
   Scenario: Withdrawing a document is recorded in the audit log
     Given a published document
     When I withdraw the document through the admin
     Then the withdrawal is recorded in the audit log
 
-  @todo
   Scenario: A withdrawn document disappears from the Burgerportaal
     Given a published document
     When I withdraw the document through the admin
     Then the document is no longer visible in the Burgerportaal
 
-  @todo
   Scenario: Deleting a document is recorded in the audit log
     Given a published document
     When I delete the document through the admin
     Then the deletion is recorded in the audit log
 
-  @todo
   Scenario: Edit a document from within its publication
     Given a published document
     When I edit the document from within its publication through the admin
     Then the document shows the edited metadata when reopened
 
-  @todo
   Scenario: Delete a document from within its publication
     Given a published document
     When I delete the document from within its publication through the admin

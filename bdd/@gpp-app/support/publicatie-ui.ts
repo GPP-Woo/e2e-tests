@@ -153,7 +153,66 @@ export function selectableInformatiecategorieUuids(page: Page): Promise<string[]
 export async function publishAndConfirmViaUi(page: Page) {
   await page.getByRole('button', { name: 'Publiceren' }).click()
   await settle(page)
-  await page.getByRole('button', { name: 'Ja, publiceren' }).click()
+  await confirmWrite(page, 'Ja, publiceren')
+  await settle(page)
+}
+
+/**
+ * Confirm a save/publish dialog and wait for the write to reach the API.
+ *
+ * The confirm button is visible and enabled a beat before the app wires its
+ * handler, so a click landing right after the dialog opens is silently dropped —
+ * the form then either sits there or re-renders empty ("Profiel is een verplicht
+ * veld"). Nothing in the DOM marks the dialog as ready (no disabled/inert
+ * state), so watch for the write itself and click again if it never came.
+ */
+async function confirmWrite(page: Page, name: string) {
+  const button = page.getByRole('button', { name })
+  await button.waitFor({ state: 'visible' })
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const write = page
+      .waitForResponse(
+        r => r.request().method() !== 'GET' && r.url().includes('/api/v2/publicaties'),
+        { timeout: 5_000 },
+      )
+      .catch(() => null)
+    await button.click().catch(() => {})
+    if (await write)
+      return
+    // A dropped click leaves the dialog open; anything else means the app moved
+    // on and re-clicking would be wrong.
+    if (!(await button.isVisible().catch(() => false)))
+      return
+  }
+}
+
+/**
+ * Fill the officiële titel and blur it.
+ *
+ * The form commits this field to its own state on `change`, not on every
+ * keystroke, so submitting straight after typing validates an empty model and
+ * comes back with "Titel is een verplicht veld" (the create flow gets away with
+ * it only because ticking a waardelijst blurs the input first).
+ */
+async function fillTitel(page: Page, titel: string) {
+  await page.locator('#titel').fill(titel)
+  await page.locator('#titel').blur()
+}
+
+/**
+ * Pick the profiel (gebruikersgroep) and wait for the form to re-render.
+ *
+ * Selecting a profiel makes the app fetch that profiel's waardelijsten and
+ * rebuild the rest of the form; anything typed before that render lands in the
+ * discarded one, and the submit then rejects with "Profiel is een verplicht
+ * veld" / "Titel is een verplicht veld". Both waardelijst groups have to be on
+ * the page before it is safe to type: the organisatie group renders first and a
+ * later arriving informatiecategorie response re-renders (and clears) the form.
+ */
+async function selectProfiel(page: Page, profielUuid: string) {
+  await page.locator('#gebruikersgroep').selectOption(profielUuid)
+  await optionGroup(page, 'Organisatie').waitFor()
+  await optionGroup(page, 'Informatiecategorie').waitFor()
   await settle(page)
 }
 
@@ -168,9 +227,8 @@ export async function publishAndConfirmViaUi(page: Page) {
  */
 export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
   await openNieuwePublicatieForm(page)
-  // Choosing a profiel reveals the rest of the form (Vue v-if); fill it deterministically.
-  await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
-  await page.locator('#titel').fill(opts.titel)
+  await selectProfiel(page, opts.profielUuid)
+  await fillTitel(page, opts.titel)
   await fillWaardelijstFields(page, opts)
   // Publish (the action under test) and confirm the document-less publish.
   await publishAndConfirmViaUi(page)
@@ -185,8 +243,7 @@ export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
  */
 export async function openNieuwePublicatieAndSelectProfielViaUi(page: Page, profielUuid: string) {
   await openNieuwePublicatieForm(page)
-  await page.locator('#gebruikersgroep').selectOption(profielUuid)
-  await settle(page)
+  await selectProfiel(page, profielUuid)
 }
 
 /**
@@ -197,8 +254,8 @@ export async function openNieuwePublicatieAndSelectProfielViaUi(page: Page, prof
  */
 export async function attemptPublishWithOnlyTitelViaUi(page: Page, opts: { profielUuid: string, titel: string }) {
   await openNieuwePublicatieForm(page)
-  await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
-  await page.locator('#titel').fill(opts.titel)
+  await selectProfiel(page, opts.profielUuid)
+  await fillTitel(page, opts.titel)
   await page.getByRole('button', { name: 'Publiceren' }).click()
 }
 
@@ -212,11 +269,11 @@ export async function attemptPublishWithOnlyTitelViaUi(page: Page, opts: { profi
  */
 export async function saveAsConceptViaUi(page: Page, opts: { profielUuid: string, titel: string }) {
   await openNieuwePublicatieForm(page)
-  await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
-  await page.locator('#titel').fill(opts.titel)
+  await selectProfiel(page, opts.profielUuid)
+  await fillTitel(page, opts.titel)
   await page.getByRole('button', { name: 'Opslaan als concept' }).click()
   await settle(page)
-  await page.getByRole('button', { name: 'Ja, sla op als concept' }).click()
+  await confirmWrite(page, 'Ja, sla op als concept')
   await settle(page)
 }
 
@@ -229,8 +286,7 @@ export async function saveAsConceptViaUi(page: Page, opts: { profielUuid: string
  */
 export async function addDocumentToNewPublicatieViaUi(page: Page, opts: { profielUuid: string, filePath: string }) {
   await openNieuwePublicatieForm(page)
-  // Choosing a profiel reveals the rest of the form, including the document widget.
-  await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
+  await selectProfiel(page, opts.profielUuid)
   await page.locator('input[type="file"]').setInputFiles(opts.filePath)
   await settle(page)
 }
@@ -364,8 +420,7 @@ export async function changeProfielAndRepublishViaUi(page: Page, titel: string, 
   onderwerpTitels?: string[]
 }) {
   await openPublicatieViaUi(page, titel)
-  await page.locator('#gebruikersgroep').selectOption(opts.nieuweProfielUuid)
-  await settle(page)
+  await selectProfiel(page, opts.nieuweProfielUuid)
   await fillWaardelijstFields(page, opts)
   await publishAndConfirmViaUi(page)
 }
@@ -378,7 +433,7 @@ export async function changeProfielAndRepublishViaUi(page: Page, titel: string, 
  */
 export async function editTitelAndRepublishViaUi(page: Page, titel: string, newTitel: string): Promise<void> {
   await openPublicatieViaUi(page, titel)
-  await page.locator('#titel').fill(newTitel)
+  await fillTitel(page, newTitel)
   await publishAndConfirmViaUi(page)
 }
 

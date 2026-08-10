@@ -3,13 +3,15 @@ import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Before, Given, test, Then, When } from '../_core/fixture'
 
-// The burgerportaal SPA never finishes booting in WebKit on this stack (stuck on
-// its "wordt geladen…" splash), so skip there instead of timing out. Chromium
-// and Firefox boot it fine.
+// Neither SPA (burgerportaal, gpp-app) finishes booting in WebKit on this stack:
+// both serve `Content-Security-Policy: upgrade-insecure-requests`, and WebKit —
+// unlike Chromium and Firefox — applies that to http://localhost as well, so
+// every asset request is upgraded to https and dies on the TLS handshake,
+// leaving the page on its "wordt geladen…" splash. Skip instead of timing out.
 Before({ tags: '@no-webkit' }, async ({ browserName }) => {
   test.skip(
     browserName === 'webkit',
-    '@no-webkit: the burgerportaal SPA does not boot in WebKit on this stack (stuck on the loading splash).',
+    '@no-webkit: the SPA does not boot in WebKit on this stack (upgrade-insecure-requests on plain http).',
   )
 })
 
