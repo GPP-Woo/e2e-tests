@@ -7,14 +7,9 @@ import { adminResource } from './admin-resource'
 /**
  * Document test-data ownership for the document-beheer scenarios (TS8).
  *
- * Documents can only be seeded through the woo-publications **token API** (the
- * Django admin add form builds the informatieobjecttype URL from the request
- * Host = `localhost`, which OpenZaak — configured for `host.docker.internal:8000`
- * — can neither match nor reach, so an admin-created document fails to register in
- * the Documenten API). So the seed posts to the token API with the Host header
- * OpenZaak expects, and rewrites the returned bestandsdeel upload URLs back to the
- * externally reachable host for the PUT. Requires the Documenten API to be
- * provisioned (setup/provision-documenten-api.sh).
+ * Documents can only be seeded through the woo-publications **token API** (an
+ * admin-created document does not register in the Documenten API). Requires the
+ * Documenten API to be provisioned (setup/provision-documenten-api.sh).
  *
  * Because the token API 500s while any admin session drives the same odrc server
  * (the user-less-token flake — see odrc.ts), TS8 seeds at Given time before its
@@ -23,11 +18,14 @@ import { adminResource } from './admin-resource'
  * the admin (session auth = a real user), exactly like the publicatie beheer (TS9).
  */
 
-// OpenZaak resolves the informatieobjecttype URL woo-publications emits from the
-// request Host; it is configured for the publicatiebank catalogi at this host. So
-// requests connect to the externally reachable origin but carry this Host header
-// (host.docker.internal is not resolvable from the test host, only inside Docker).
-const ODRC_HOST = 'host.docker.internal:8000'
+// woo-publications builds the informatieobjecttype URL it hands to OpenZaak from
+// the request Host, and OpenZaak has to be able to *fetch* that URL. So requests
+// connect to the externally reachable origin but carry the in-cluster host as
+// their Host header (which is also what setup/provision-documenten-api.sh
+// registers as OpenZaak's catalogi Service). Override for a non-kind stack.
+// The FQDN, not the bare svc name: Django's URLValidator (OpenZaak side) rejects
+// a dotless hostname, so the built URL would come back as "bad-url".
+const ODRC_HOST = process.env.ODRC_INTERNAL_HOST ?? 'gpp-publicatiebank-nginx.gpp-e2e.svc.cluster.local'
 const EXTERNAL_ORIGIN = new URL(ENV.odrc.baseUrl).origin
 const API_BASE = `${EXTERNAL_ORIGIN}/api/v2/`
 
@@ -41,9 +39,8 @@ const resource = adminResource({
 function tokenHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
     'Authorization': `Token ${ENV.odrc.apiKey}`,
-    // Host must be set so woo-publications emits an informatieobjecttype URL on
-    // ODRC_HOST. `fetch` cannot set Host (a forbidden header), so the seed uses
-    // Playwright's APIRequestContext, which does.
+    // `fetch` cannot set Host (a forbidden header), so the seed uses Playwright's
+    // APIRequestContext, which does.
     'Host': ODRC_HOST,
     'Audit-User-ID': 'e2e',
     'Audit-User-Representation': 'E2E test suite',

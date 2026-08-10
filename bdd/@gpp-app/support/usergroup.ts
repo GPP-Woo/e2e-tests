@@ -115,13 +115,26 @@ export async function resolveOrganisatieUuid(ctx: APIRequestContext, naam: strin
   return uuid
 }
 
+/** UUID of an onderwerp by exact officiële titel, from the gpp-app waardelijst. Throws if absent. */
+export async function resolveOnderwerpUuid(ctx: APIRequestContext, titel: string): Promise<string> {
+  const onderwerpen = await firstPage<{ uuid: string, officieleTitel: string }>(ctx, '/api/v2/onderwerpen')
+  const uuid = onderwerpen.find(o => o.officieleTitel === titel)?.uuid
+  if (!uuid)
+    throw new Error(`Onderwerp "${titel}" not visible in the gpp-app waardelijst (${onderwerpen.length} present)`)
+  return uuid
+}
+
 /** The first available informatiecategorie (uuid + naam) from the gpp-app waardelijst. Throws if none. */
 export async function firstInformatiecategorie(ctx: APIRequestContext): Promise<{ uuid: string, naam: string }> {
+  return (await informatiecategorieen(ctx, 1))[0]
+}
+
+/** The first `count` informatiecategorieën from the gpp-app waardelijst. Throws if there are fewer. */
+export async function informatiecategorieen(ctx: APIRequestContext, count: number): Promise<{ uuid: string, naam: string }[]> {
   const cats = await firstPage<{ uuid: string, naam: string }>(ctx, '/api/v2/informatiecategorieen')
-  const cat = cats[0]
-  if (!cat?.uuid)
-    throw new Error('No informatiecategorie available in the gpp-app waardelijst')
-  return { uuid: cat.uuid, naam: cat.naam }
+  if (cats.length < count)
+    throw new Error(`Need ${count} informatiecategorieën in the gpp-app waardelijst, found ${cats.length}`)
+  return cats.slice(0, count).map(({ uuid, naam }) => ({ uuid, naam }))
 }
 
 /**

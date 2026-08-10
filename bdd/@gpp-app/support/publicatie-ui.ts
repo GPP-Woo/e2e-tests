@@ -40,6 +40,17 @@ export async function openMijnPublicaties(page: Page) {
   await settle(page)
 }
 
+/**
+ * Open the "Nieuwe publicatie" form: Mijn publicaties -> "Nieuwe publicatie".
+ * That control is a *link* (`<a href="/publicaties">`), not a button — asking
+ * for a button role silently waits forever.
+ */
+export async function openNieuwePublicatieForm(page: Page) {
+  await openMijnPublicaties(page)
+  await page.getByRole('link', { name: 'Nieuwe publicatie' }).click()
+  await settle(page)
+}
+
 export interface PublicatieInput {
   /** UUID of the authorised gebruikersgroep (the "Profiel" <option> value). */
   profielUuid: string
@@ -67,14 +78,42 @@ export interface PublicatieInput {
  * re-scopes (and can clear) all three fields.
  */
 async function fillWaardelijstFields(page: Page, opts: { organisatieUuid: string, informatiecategorieUuid: string, onderwerpTitels?: string[] }) {
+  await openOptionGroup(page, 'Organisatie')
   await page.locator(`input[type="radio"][value="${opts.organisatieUuid}"]`).check()
+  await openOptionGroup(page, 'Informatiecategorie')
   await page.locator(`input[type="checkbox"][value="${opts.informatiecategorieUuid}"]`).check()
-  for (const onderwerpTitel of opts.onderwerpTitels ?? []) {
-    const checkbox = page.getByRole('checkbox', { name: onderwerpTitel })
-    if (!(await checkbox.isVisible().catch(() => false)))
-      await page.getByText('Onderwerpen', { exact: true }).click()
-    await checkbox.check()
-  }
+  if (opts.onderwerpTitels?.length)
+    await openOptionGroup(page, 'Onderwerp')
+  for (const onderwerpTitel of opts.onderwerpTitels ?? [])
+    await page.getByRole('checkbox', { name: onderwerpTitel }).check()
+}
+
+/**
+ * The form renders each waardelijst option-group inside a collapsed `<details>`
+ * ("Organisatie *", "Informatiecategorieën *", "Onderwerpen"), so its inputs
+ * have no visible box until the summary is clicked — `.check()` would wait for
+ * a visible element until the test times out. Idempotent: a group that is
+ * already open is left alone.
+ */
+export async function openOptionGroup(page: Page, label: string) {
+  const group = optionGroup(page, label)
+  if (!(await group.evaluate(el => el.hasAttribute('open'))))
+    await group.locator('summary').first().click()
+}
+
+/**
+ * The field-scoped validation message a failed publish renders inside a
+ * waardelijst option-group ("Kies één optie." / "Kies minimaal één optie.").
+ * It is a plain `<p class="error">` with no alert role, and lives inside the
+ * (collapsible) group — so expand the group before asserting visibility.
+ */
+export function optionGroupError(page: Page, label: string) {
+  return optionGroup(page, label).locator('p.error')
+}
+
+/** The `<details>` option-group whose summary starts with `label`. */
+function optionGroup(page: Page, label: string) {
+  return page.locator('details').filter({ has: page.locator('summary', { hasText: label }) }).first()
 }
 
 /**
@@ -82,26 +121,26 @@ async function fillWaardelijstFields(page: Page, opts: { organisatieUuid: string
  * informatiecategorie (checkbox) option on the "Nieuwe publicatie" form —
  * both option-groups carry the waardelijst uuid as their `value` (see
  * {@link fillWaardelijstFields}), so this is how a profiel's autorisaties
- * are read back deterministically. Onderwerp checkboxes are not gated by the
- * profiel and are not carrying a uuid `value` in the first place, and (unlike
- * organisatie/informatiecategorie) stay hidden until their "Onderwerpen"
- * section is expanded — so as long as that section is left collapsed, the
- * `:visible` checkboxes on the page are exactly the informatiecategorie ones.
+ * are read back deterministically. Scoped to the option-group itself rather
+ * than to whatever inputs happen to be visible on the page, and the group's
+ * "selecteer alles" toggle (value `on`, no uuid) is dropped.
  */
-async function selectableWaardelijstValues(page: Page, inputType: 'radio' | 'checkbox'): Promise<string[]> {
-  return page.locator(`input[type="${inputType}"]:visible`).evaluateAll(
+async function selectableWaardelijstValues(page: Page, label: string, inputType: 'radio' | 'checkbox'): Promise<string[]> {
+  await openOptionGroup(page, label)
+  const values = await optionGroup(page, label).locator(`input[type="${inputType}"]`).evaluateAll(
     inputs => inputs.map(input => (input as HTMLInputElement).value),
   )
+  return values.filter(value => value !== 'on')
 }
 
 /** The `value`s of the organisatie options the "Nieuwe publicatie" form currently offers. */
 export function selectableOrganisatieUuids(page: Page): Promise<string[]> {
-  return selectableWaardelijstValues(page, 'radio')
+  return selectableWaardelijstValues(page, 'Organisatie', 'radio')
 }
 
 /** The `value`s of the informatiecategorie options the "Nieuwe publicatie" form currently offers. */
 export function selectableInformatiecategorieUuids(page: Page): Promise<string[]> {
-  return selectableWaardelijstValues(page, 'checkbox')
+  return selectableWaardelijstValues(page, 'Informatiecategorie', 'checkbox')
 }
 
 /**
@@ -128,9 +167,7 @@ export async function publishAndConfirmViaUi(page: Page) {
  * publicatie opens a "Publicatie zonder documenten" confirm dialog ("Ja, publiceren").
  */
 export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
-  await openMijnPublicaties(page)
-  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
-  await settle(page)
+  await openNieuwePublicatieForm(page)
   // Choosing a profiel reveals the rest of the form (Vue v-if); fill it deterministically.
   await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
   await page.locator('#titel').fill(opts.titel)
@@ -147,9 +184,7 @@ export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
  * {@link selectableInformatiecategorieUuids}) — rather than create a publicatie.
  */
 export async function openNieuwePublicatieAndSelectProfielViaUi(page: Page, profielUuid: string) {
-  await openMijnPublicaties(page)
-  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
-  await settle(page)
+  await openNieuwePublicatieForm(page)
   await page.locator('#gebruikersgroep').selectOption(profielUuid)
   await settle(page)
 }
@@ -161,9 +196,7 @@ export async function openNieuwePublicatieAndSelectProfielViaUi(page: Page, prof
  * since the SPA is expected to block the publish on the missing fields.
  */
 export async function attemptPublishWithOnlyTitelViaUi(page: Page, opts: { profielUuid: string, titel: string }) {
-  await openMijnPublicaties(page)
-  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
-  await settle(page)
+  await openNieuwePublicatieForm(page)
   await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
   await page.locator('#titel').fill(opts.titel)
   await page.getByRole('button', { name: 'Publiceren' }).click()
@@ -178,9 +211,7 @@ export async function attemptPublishWithOnlyTitelViaUi(page: Page, opts: { profi
  * redirects back to the gpp-app homepage (Mijn publicaties).
  */
 export async function saveAsConceptViaUi(page: Page, opts: { profielUuid: string, titel: string }) {
-  await openMijnPublicaties(page)
-  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
-  await settle(page)
+  await openNieuwePublicatieForm(page)
   await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
   await page.locator('#titel').fill(opts.titel)
   await page.getByRole('button', { name: 'Opslaan als concept' }).click()
@@ -197,23 +228,30 @@ export async function saveAsConceptViaUi(page: Page, opts: { profielUuid: string
  * caller reads back with {@link documentTitelField} / {@link documentDatumField}.
  */
 export async function addDocumentToNewPublicatieViaUi(page: Page, opts: { profielUuid: string, filePath: string }) {
-  await openMijnPublicaties(page)
-  await page.getByRole('button', { name: 'Nieuwe publicatie' }).click()
-  await settle(page)
+  await openNieuwePublicatieForm(page)
   // Choosing a profiel reveals the rest of the form, including the document widget.
   await page.locator('#gebruikersgroep').selectOption(opts.profielUuid)
   await page.locator('input[type="file"]').setInputFiles(opts.filePath)
   await settle(page)
 }
 
-/** The auto-filled "Titel document" field after {@link addDocumentToNewPublicatieViaUi}. */
-export function documentTitelField(page: Page) {
-  return page.getByLabel('Titel document')
+/**
+ * The "Documenten" fieldset. Its per-document fields reuse the publicatie's own
+ * labels ("Titel *", "Verkorte titel", "Omschrijving"), so anything read out of
+ * a document must be scoped here rather than looked up on the whole page.
+ */
+function documentenFieldset(page: Page) {
+  return page.locator('fieldset').filter({ has: page.locator('legend', { hasText: 'Documenten' }) })
 }
 
-/** The auto-filled "Datum document" field after {@link addDocumentToNewPublicatieViaUi}. */
+/** The auto-filled document titel field after {@link addDocumentToNewPublicatieViaUi}. */
+export function documentTitelField(page: Page) {
+  return documentenFieldset(page).getByLabel('Titel *', { exact: true }).first()
+}
+
+/** The auto-filled document datum field after {@link addDocumentToNewPublicatieViaUi}. */
 export function documentDatumField(page: Page) {
-  return page.getByLabel('Datum document')
+  return documentenFieldset(page).getByLabel('Datum document *', { exact: true }).first()
 }
 
 /** Open a publicatie by titel from "Mijn publicaties". */

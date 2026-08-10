@@ -2,59 +2,51 @@
 # Provision the Documenten API on the local GPP-Woo stack so publicaties can own
 # documents (unblocks TS8 — see PLAN-plateau4-remaining.md "TS8").
 #
-# OpenZaak already ships the API-authorisation applicatie + jwtsecret + the ORC
-# service back to the publicatiebank catalogi (GPP-app/docker/open-zaak/fixtures/
-# configuration.json, loaded at deploy). The publicatiebank (woo-publications /
-# odrc) side is NOT wired by the deploy (its fixture is "stale" — see the compose
-# comment), so this script creates the DRC Service + GlobalConfiguration there.
-# Idempotent: re-running updates in place. Requires the stack to be up.
+# Two things have to be wired, neither of which the deploy does:
+#   1. publicatiebank (odrc) -> a DRC Service + GlobalConfiguration pointing at
+#      OpenZaak's Documenten API, so POST /api/v2/documenten stops raising
+#      "No documents API configured yet!".
+#   2. OpenZaak -> an ORC Service for the publicatiebank *catalogi* API, so it can
+#      resolve the informatieobjecttype URL odrc sends along. That URL is built
+#      from the request Host, so it must be the host OpenZaak can reach odrc on
+#      (which is why the seed sends that Host — see bdd/@publicatiebank/support/
+#      document.ts). The chart's openzaak fixture still points at the compose
+#      host.docker.internal, hence this step.
+#
+# Works against both the kind cluster (default, `kubectl exec`) and the old
+# docker-compose stack (`STACK=compose`). Idempotent: re-running updates in place.
 #
 #   ./setup/provision-documenten-api.sh
 #
 # Verify: POST /api/v2/documenten no longer 500s "No documents API configured".
 set -euo pipefail
 
+STACK="${STACK:-kind}"
+NAMESPACE="${NAMESPACE:-gpp-e2e}"
 ODRC_CONTAINER="${ODRC_CONTAINER:-gpp-woo-odrc-django-1}"
-# Must match GPP-app/docker/open-zaak/fixtures/configuration.json (applicatie +
-# jwtsecret) so woo-publications authenticates to OpenZaak's Documenten API.
+OZ_CONTAINER="${OZ_CONTAINER:-gpp-woo-openzaak-web-1}"
+# Must match the openzaak fixture (applicatie + jwtsecret) so woo-publications
+# authenticates to OpenZaak's Documenten API.
 CLIENT_ID="${OZ_CLIENT_ID:-woo-publications-dev}"
 SECRET="${OZ_SECRET:-insecure-yQL9Rzh4eHGVmYx5w3J2gu}"
-# openzaak.docker.internal:8001 = OpenZaak's published port, reachable from the
-# odrc container via the extra_hosts host-gateway entry in the compose.
-DRC_ROOT="${DRC_ROOT:-http://openzaak.docker.internal:8001/documenten/api/v1/}"
 RSIN="${ORG_RSIN:-123456782}"
 
-# woo-publications' Application token authenticates as a user-less token
-# (request.user is None), which makes sessionprofile's middleware raise
-# AttributeError on every API response while an admin session is active — so the
-# token API (the only way to seed documents) 500s throughout an e2e run. The
-# durable fix lives in GPP-publicatiebank source (api/authorization.py returns
-# AnonymousUser instead of None); this live-patches the running image too so a
-# stack that has not been rebuilt still works. Idempotent + restarts odrc.
-if docker exec -i "$ODRC_CONTAINER" python - <<'PY'
-p = "/app/src/woo_publications/api/authorization.py"
-s = open(p).read()
-if "AnonymousUser" not in s:
-    s = s.replace(
-        "from .models import Application",
-        "from django.contrib.auth.models import AnonymousUser\n\nfrom .models import Application",
-    ).replace("return (None, token)", "return (AnonymousUser(), token)")
-    open(p, "w").write(s)
-    raise SystemExit(10)  # signal "patched, needs restart"
-raise SystemExit(0)
-PY
-then
-  echo "token auth already returns AnonymousUser"
-elif [ $? -eq 10 ]; then
-  echo "patched token auth -> AnonymousUser; restarting $ODRC_CONTAINER"
-  docker restart "$ODRC_CONTAINER" >/dev/null
-  for _ in $(seq 1 30); do
-    docker exec "$ODRC_CONTAINER" python -c "import urllib.request as u; u.urlopen('http://localhost:8000/admin/login/')" >/dev/null 2>&1 && break
-    sleep 2
-  done
+if [ "$STACK" = kind ]; then
+  DRC_ROOT="${DRC_ROOT:-http://openzaak:8000/documenten/api/v1/}"
+  # In-cluster host for odrc; also the Host the e2e document seed sends. Must be
+  # the FQDN: Django's URLValidator rejects a dotless hostname, so OpenZaak would
+  # reject the informatieobjecttype URL built from a bare svc name with 'bad-url'.
+  ODRC_ROOT="${ODRC_ROOT:-http://gpp-publicatiebank-nginx.${NAMESPACE}.svc.cluster.local/catalogi/api/v1/}"
+  odrc_shell() { kubectl exec -n "$NAMESPACE" -i "deploy/gpp-publicatiebank" -- python /app/src/manage.py shell -c "$1"; }
+  oz_shell() { kubectl exec -n "$NAMESPACE" -i "deploy/openzaak-web" -- python /app/src/manage.py shell -c "$1"; }
+else
+  DRC_ROOT="${DRC_ROOT:-http://openzaak.docker.internal:8001/documenten/api/v1/}"
+  ODRC_ROOT="${ODRC_ROOT:-http://host.docker.internal:8000/catalogi/api/v1/}"
+  odrc_shell() { docker exec -i "$ODRC_CONTAINER" python /app/src/manage.py shell -c "$1"; }
+  oz_shell() { docker exec -i "$OZ_CONTAINER" python /app/src/manage.py shell -c "$1"; }
 fi
 
-docker exec "$ODRC_CONTAINER" python /app/src/manage.py shell -c "
+odrc_shell "
 from zgw_consumers.models import Service
 from zgw_consumers.constants import APITypes, AuthTypes
 from woo_publications.config.models import GlobalConfiguration
@@ -79,4 +71,20 @@ if not cfg.organisation_rsin:
 cfg.save()
 print('documenten-api service', 'created' if created else 'updated', '->', svc.api_root)
 print('global config: documents_api_service=', cfg.documents_api_service_id, 'rsin=', cfg.organisation_rsin)
+"
+
+oz_shell "
+from zgw_consumers.models import Service
+from zgw_consumers.constants import APITypes, AuthTypes
+# OpenZaak ships an older zgw_consumers whose Service has no slug; key on api_root.
+svc, created = Service.objects.update_or_create(
+    api_root='${ODRC_ROOT}',
+    defaults=dict(
+        label='Woo Publications (catalogi)',
+        oas='${ODRC_ROOT}',
+        api_type=APITypes.orc,
+        auth_type=AuthTypes.no_auth,
+    ),
+)
+print('catalogi service', 'created' if created else 'updated', '->', svc.api_root)
 "

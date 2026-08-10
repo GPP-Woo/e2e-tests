@@ -21,7 +21,9 @@ import {
   ingetrokkenStatusBanner,
   intrekkenDialog,
   openMijnPublicaties,
+  openOptionGroup,
   openPublicatieViaUi,
+  optionGroupError,
   saveAsConceptViaUi,
   searchPublicatiesByDateViaUi,
   sortPublicatiesViaUi,
@@ -51,6 +53,17 @@ Given('the signed-in user belongs to an authorised gebruikersgroep', async ({ au
   scratch.set('informatiecategorieUuid', informatiecategorieUuid)
 })
 
+/**
+ * Same prerequisite, but authorised for *two* organisaties + informatiecategorieën.
+ * The form pre-selects a waardelijst the profiel only has one value of, so with
+ * the single-value profiel above nothing is ever "missing" and publishing with
+ * only a titel simply succeeds.
+ */
+Given('the signed-in user belongs to a gebruikersgroep with several waardelijstwaarden', async ({ authProfile, scratch }) => {
+  const { profielUuid } = await authProfile.seed({ choices: 2 })
+  scratch.set('profielUuid', profielUuid)
+})
+
 When('I create and publish a publicatie through the gpp-app', async ({ page, publications, scratch }) => {
   const titel = publications.freshName()
   await createAndPublishViaUi(page, {
@@ -73,10 +86,11 @@ Then('the publicatie is public on the burgerportaal', async ({ page, publication
 // --- Withdraw (intrekken) ---------------------------------------------------
 
 Given('a published publicatie owned by the signed-in user', async ({ page, authProfile, publications, topics, scratch }) => {
-  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed()
   const titel = publications.freshName()
   // Link an onderwerp too, so scenarios that filter/read it back have a real value.
+  // The profiel must be authorised for it — the form only offers authorised ones.
   const onderwerpTitel = await topics.add()
+  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed({ onderwerpTitels: [onderwerpTitel] })
   await createAndPublishViaUi(page, { profielUuid, organisatieUuid, informatiecategorieUuid, titel, onderwerpTitels: [onderwerpTitel] })
   publications.track(titel)
   scratch.set('informatiecategorieUuid', informatiecategorieUuid)
@@ -99,13 +113,16 @@ Then('the publicatie is no longer public', async ({ page, publications }) => {
 // informatiecategorie), so a couple are seeded ad hoc through the `topics`
 // fixture and selected by their visible titel in the "Onderwerpen" section.
 
-When('I select one or more onderwerpen while creating a publicatie', async ({ page, publications, topics, scratch }) => {
+When('I select one or more onderwerpen while creating a publicatie', async ({ page, authProfile, publications, topics, scratch }) => {
   const titel = publications.freshName()
   const onderwerpTitels = [await topics.add(), await topics.add()]
+  // Re-seed the profiel with these onderwerpen authorised: the "Onderwerp"
+  // section only lists what the selected profiel is authorised for.
+  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed({ onderwerpTitels })
   await createAndPublishViaUi(page, {
-    profielUuid: scratch.get('profielUuid')!,
-    organisatieUuid: scratch.get('organisatieUuid')!,
-    informatiecategorieUuid: scratch.get('informatiecategorieUuid')!,
+    profielUuid,
+    organisatieUuid,
+    informatiecategorieUuid,
     titel,
     onderwerpTitels,
   })
@@ -152,8 +169,10 @@ When('I try to publish a new publicatie with only a titel', async ({ page, publi
 })
 
 Then('the gpp-app shows validation messages for the missing required fields', async ({ page }) => {
-  await expect(page.getByRole('alert', { name: /organisatie/i })).toBeVisible()
-  await expect(page.getByRole('alert', { name: /informatiecategorie/i })).toBeVisible()
+  for (const label of ['Organisatie', 'Informatiecategorie']) {
+    await openOptionGroup(page, label)
+    await expect(optionGroupError(page, label)).toBeVisible()
+  }
 })
 
 // --- Save as concept ---------------------------------------------------------
@@ -170,7 +189,7 @@ When('I save a new publicatie as concept and confirm the concept dialog', async 
 })
 
 Then('I return to the gpp-app homepage', async ({ page }) => {
-  await expect(page.getByRole('button', { name: 'Nieuwe publicatie' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Nieuwe publicatie' })).toBeVisible()
 })
 
 Then('the concept publicatie appears in my publicaties list', async ({ page, publications }) => {
@@ -289,8 +308,13 @@ Then('the publicatie is shown as gepubliceerd before I edit it', async ({ page }
 
 Given('the signed-in user is authorised for a second gebruikersgroep', async ({ authProfile, scratch }) => {
   // A second, independent authorised profiel — its own gebruikersgroep, organisatie
-  // and informatiecategorie — so the profiel picker offers a real choice.
-  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed()
+  // and informatiecategorie — so the profiel picker offers a real choice. It also
+  // authorises the onderwerp already linked to the publicatie, since switching
+  // profiel re-scopes the "Onderwerp" section to the new profiel's autorisaties.
+  const onderwerpTitel = scratch.get('onderwerpTitel')
+  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed(
+    onderwerpTitel ? { onderwerpTitels: [onderwerpTitel] } : {},
+  )
   scratch.set('secondProfielUuid', profielUuid)
   scratch.set('secondOrganisatieUuid', organisatieUuid)
   scratch.set('secondInformatiecategorieUuid', informatiecategorieUuid)

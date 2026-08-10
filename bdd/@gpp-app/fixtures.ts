@@ -4,7 +4,7 @@ import { makeResourceManager } from '@/bdd/_core/resource-manager'
 import { adminState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
 import { request as apiRequest } from '@playwright/test'
-import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, firstInformatiecategorie, getUsergroupDetail, resolveOrganisatieUuid, usergroupExists } from './support/usergroup'
+import { createAuthorisedGroup, currentUserId, deleteUsergroupByName, getUsergroupDetail, informatiecategorieen, resolveOnderwerpUuid, resolveOrganisatieUuid, usergroupExists } from './support/usergroup'
 
 /**
  * GPP-app-owned fixtures. Extends the publicatiebank test (not core) because
@@ -38,8 +38,13 @@ export interface AuthProfileSeeder {
    * UI) plus the organisatie + informatiecategorie uuids — the publicatie form's
    * inputs all carry those uuids as their `value`, so the create flow selects
    * them deterministically.
+   *
+   * `choices` authorises that many organisaties + informatiecategorieën instead
+   * of one. With a single authorised value the form pre-selects it, so a
+   * scenario that needs the required-field validation to fire must seed at
+   * least two of each; the returned uuids are always the first of each.
    */
-  seed: () => Promise<{ profielUuid: string, naam: string, organisatieUuid: string, informatiecategorieUuid: string }>
+  seed: (opts?: { onderwerpTitels?: string[], choices?: number }) => Promise<{ profielUuid: string, naam: string, organisatieUuid: string, informatiecategorieUuid: string }>
 }
 
 export interface GppAppFixtures {
@@ -85,15 +90,22 @@ export const gppAppTest = publicatiebankTest.extend<GppAppFixtures>({
     const createdUuids: string[] = []
     try {
       await use({
-        async seed() {
+        async seed({ onderwerpTitels = [], choices = 1 } = {}) {
           // Match membership on the caller's real identity claim, read from odpc.
           const gebruikerId = await currentUserId(ctx)
           // Owned + cleaned up by the organisations fixture; must be actief to appear.
-          const orgNaam = await organisations.add()
-          const orgUuid = await resolveOrganisatieUuid(ctx, orgNaam)
-          const cat = await firstInformatiecategorie(ctx)
+          const orgUuids: string[] = []
+          for (let i = 0; i < choices; i++)
+            orgUuids.push(await resolveOrganisatieUuid(ctx, await organisations.add()))
+          const orgUuid = orgUuids[0]
+          const cats = await informatiecategorieen(ctx, choices)
+          const cat = cats[0]
+          // The publicatie form only offers onderwerpen the profiel is
+          // authorised for, so a scenario that links one must have it in the
+          // group's waardelijsten — its "Onderwerp" section is absent otherwise.
+          const onderwerpUuids = await Promise.all(onderwerpTitels.map(titel => resolveOnderwerpUuid(ctx, titel)))
           const naam = `E2E profiel ${testInfo.workerIndex}-${createdUuids.length}-${Date.now()}`
-          const uuid = await createAuthorisedGroup(ctx, { naam, gebruikerId, waardelijstUuids: [orgUuid, cat.uuid] })
+          const uuid = await createAuthorisedGroup(ctx, { naam, gebruikerId, waardelijstUuids: [...orgUuids, ...cats.map(c => c.uuid), ...onderwerpUuids] })
           createdUuids.push(uuid)
           return { profielUuid: uuid, naam, organisatieUuid: orgUuid, informatiecategorieUuid: cat.uuid }
         },

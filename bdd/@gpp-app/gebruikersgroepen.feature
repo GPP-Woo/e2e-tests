@@ -15,7 +15,7 @@
 # fetches through the same service token that intermittently 500s under load
 # (see README "Known server flake") and are not exposed on the group list API, so
 # they are not asserted here.
-@admin
+@admin @timeout:120000
 Feature: Gebruikersgroepen beheren in de GPP-app
   As functioneel beheer
   I want to create, rename and delete gebruikersgroepen
@@ -37,6 +37,7 @@ Feature: Gebruikersgroepen beheren in de GPP-app
 
   # 4b (omschrijving), 4c (gebruiker), 4d/4e/4f (autorisaties), 4g (opslaan).
   Scenario: Create a gebruikersgroep with an omschrijving, a gebruiker and autorisaties
+    Given waardelijsten to authorise the gebruikersgroep for
     When I create a gebruikersgroep with a naam and omschrijving through the gpp-app
     And I add myself as a gebruiker to the gebruikersgroep
     And I authorise the gebruikersgroep for one or more organisaties

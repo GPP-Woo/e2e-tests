@@ -52,7 +52,7 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     And the document date is filled in automatically
 
   Scenario: Publishing with missing required fields shows validation messages
-    Given the signed-in user belongs to an authorised gebruikersgroep
+    Given the signed-in user belongs to a gebruikersgroep with several waardelijstwaarden
     When I try to publish a new publicatie with only a titel
     Then the gpp-app shows validation messages for the missing required fields
 

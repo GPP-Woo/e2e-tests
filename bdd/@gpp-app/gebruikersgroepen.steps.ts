@@ -3,8 +3,9 @@ import { adminState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
 import { request as apiRequest, expect } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
-import { createAndPublishViaUi, openNieuwePublicatieAndSelectProfielViaUi, openPublicatieViaUi, publishAndConfirmViaUi, selectableInformatiecategorieUuids, selectableOrganisatieUuids } from './support/publicatie-ui'
-import { resolveOrganisatieUuid } from './support/usergroup'
+import { publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
+import { createAndPublishViaUi, openNieuwePublicatieAndSelectProfielViaUi, openOptionGroup, openPublicatieViaUi, selectableInformatiecategorieUuids, selectableOrganisatieUuids } from './support/publicatie-ui'
+import { informatiecategorieen, resolveOrganisatieUuid } from './support/usergroup'
 
 /**
  * Testscript 5 (gebruikersgroepen) steps. Every UI mutation runs through the
@@ -119,25 +120,45 @@ When('I add myself as a gebruiker to the gebruikersgroep', async ({ page }) => {
   // UI adds a gebruiker by e-mail rather than by id.
   await page.getByRole('textbox', { name: 'Gebruiker toevoegen ?' }).fill(ENV.users.admin.email)
   await page.getByRole('button', { name: 'Toevoegen' }).click()
-  await page.getByText('Toegevoegde gebruikers').click()
+  await openOptionGroup(page, 'Toegevoegde gebruikers')
 })
 
-When('I authorise the gebruikersgroep for one or more organisaties', async ({ page }) => {
-  await page.getByText('Organisatie', { exact: true }).click()
-  await page.getByRole('checkbox', { name: '@testorganisatie' }).check()
-  await page.getByRole('checkbox', { name: 'Oost Gelre', exact: true }).check()
+/**
+ * The autorisatie sections only render once the waardelijsten they list are
+ * non-empty: with no *actieve* organisatie the form shows "Er is iets misgegaan
+ * bij het ophalen van de waardelijsten" and no sections at all, and the
+ * "Onderwerp" section is absent until at least one onderwerp exists. Both are
+ * test-owned here (a concept onderwerp is enough and stays off the
+ * burgerportaal) instead of relying on demo rows that a fresh stack lacks.
+ */
+Given('waardelijsten to authorise the gebruikersgroep for', async ({ organisations, topics, scratch }) => {
+  const orgNaam = await organisations.add()
+  scratch.set('groep:onderwerpTitel', await topics.add())
+  const ctx = await apiRequest.newContext({ storageState: adminState })
+  try {
+    scratch.set('groep:organisatieUuid', await resolveOrganisatieUuid(ctx, orgNaam))
+    const cats = await informatiecategorieen(ctx, 2)
+    scratch.set('groep:catUuids', JSON.stringify(cats.map(c => c.uuid)))
+  }
+  finally {
+    await ctx.dispose()
+  }
 })
 
-When('I authorise the gebruikersgroep for one or more informatiecategorieën', async ({ page }) => {
-  await page.getByText('Informatiecategorie').click()
-  await page.getByRole('checkbox', { name: 'advies', exact: true }).check()
-  await page.getByRole('checkbox', { name: 'convenant', exact: true }).check()
+When('I authorise the gebruikersgroep for one or more organisaties', async ({ page, scratch }) => {
+  await openOptionGroup(page, 'Organisatie')
+  await page.locator(`input[type="checkbox"][value="${scratch.get('groep:organisatieUuid')}"]`).check()
 })
 
-When('I authorise the gebruikersgroep for one or more onderwerpen', async ({ page }) => {
-  await page.getByText('Onderwerp').click()
-  await page.getByRole('checkbox', { name: 'Aanleg stadspark' }).check()
-  await page.getByRole('checkbox', { name: 'Samen Duurzaam Vooruit' }).check()
+When('I authorise the gebruikersgroep for one or more informatiecategorieën', async ({ page, scratch }) => {
+  await openOptionGroup(page, 'Informatiecategorie')
+  for (const uuid of JSON.parse(scratch.get('groep:catUuids')!) as string[])
+    await page.locator(`input[type="checkbox"][value="${uuid}"]`).check()
+})
+
+When('I authorise the gebruikersgroep for one or more onderwerpen', async ({ page, scratch }) => {
+  await openOptionGroup(page, 'Onderwerp')
+  await page.getByRole('checkbox', { name: scratch.get('groep:onderwerpTitel')! }).check()
 })
 
 When('I save the gebruikersgroep', async ({ page }) => {
@@ -192,7 +213,7 @@ When('I add another gebruiker to the gebruikersgroep through the gpp-app', async
   await openGroup(page, usergroups.last())
   await page.getByRole('textbox', { name: 'Gebruiker toevoegen ?' }).fill(secondUserEmail)
   await page.getByRole('button', { name: 'Toevoegen' }).click()
-  await page.getByText('Toegevoegde gebruikers').click()
+  await openOptionGroup(page, 'Toegevoegde gebruikers')
   // Confirm the row actually landed before saving.
   await expect(page.getByRole('cell', { name: secondUserEmail, exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Opslaan' }).click()
@@ -228,7 +249,7 @@ When('I change the gebruikersgroep autorisaties through the gpp-app', async ({ p
   scratch.set('groep:newOrganisatieUuid', newOrganisatieUuid)
 
   await openGroup(page, naam)
-  await page.getByText('Organisatie', { exact: true }).click()
+  await openOptionGroup(page, 'Organisatie')
   await page.locator(`input[type="checkbox"][value="${oldOrganisatieUuid}"]`).uncheck()
   await page.locator(`input[type="checkbox"][value="${newOrganisatieUuid}"]`).check()
   await page.getByRole('button', { name: 'Opslaan' }).click()
@@ -264,24 +285,23 @@ Given('an existing publicatie made under that gebruikersgroep', async ({ page, p
     titel,
   })
   publications.track(titel)
+  // Make sure it actually published before the scenario strips the autorisatie.
+  await expect.poll(() => publicationStatusAdmin(page, titel), READ).toBe('gepubliceerd')
 })
 
 When('I remove the informatiecategorie autorisatie from the gebruikersgroep through the gpp-app', async ({ page, scratch }) => {
   const naam = scratch.get('groep:naam')!
   const informatiecategorieUuid = scratch.get('informatiecategorieUuid')!
   await openGroup(page, naam)
-  await page.getByText('Informatiecategorie').click()
+  await openOptionGroup(page, 'Informatiecategorie')
   await page.locator(`input[type="checkbox"][value="${informatiecategorieUuid}"]`).uncheck()
   await page.getByRole('button', { name: 'Opslaan' }).click()
 })
 
 When('I open the existing publicatie for editing in the gpp-app', async ({ page, publications }) => {
+  // Opening it is enough: the app renders the "no longer authorised" notice on
+  // the publicatie itself, it does not wait for a republish attempt.
   await openPublicatieViaUi(page, publications.last())
-  // Editing a gepubliceerd publicatie in this app means re-publishing it (see
-  // editTitelAndRepublishViaUi/changeProfielAndRepublishViaUi in publicatie-ui.ts)
-  // — attempting that republish is what surfaces the now-unauthorised-
-  // informatiecategorie error, so the attempt itself belongs in this step.
-  await publishAndConfirmViaUi(page)
 })
 
 Then('I see an error telling me to contact the beheerder', async ({ page }) => {
