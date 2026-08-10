@@ -19,7 +19,8 @@ import { adminResource } from './admin-resource'
  * configured (`/documenten` POST → 500 "No documents API configured yet"), so
  * publicaties are created document-less.
  */
-const resource = adminResource({
+/** Shared Django-admin changelist mechanics for this entity (also drives its `adminDriver`). */
+export const resource = adminResource({
   path: 'publications/publication',
   rowMatch: 'result-row',
   changeId: '[0-9a-f-]+',

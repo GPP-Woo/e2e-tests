@@ -1,24 +1,22 @@
 import type { ImageKind } from '@/bdd/@burgerportaal/support/beheer-config'
+import type { Page } from '@playwright/test'
 import type { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { settle, stagehandPage } from '@/bdd/_core/stagehand'
 import { expect } from '@playwright/test'
-import { z } from 'zod'
 import { Given, Then, When } from '../../_core/fixture'
 import { ENV } from '../../_core/types'
 
 /**
- * Testscript 1 steps. Mutations run through the beheer UI via Stagehand
- * (natural-language `act()` on Dutch field/menu labels); assertions run against
- * the public site deterministically — the config API
- * (`/api/environment/resources`), raw image bytes, and one AI `extract()` to
- * prove a burger actually sees the rendered welcome text.
+ * Testscript 1 steps. Mutations run through the beheer UI with plain Playwright
+ * locators against its Dutch labels; assertions run against the public site —
+ * the config API (`/api/environment/resources`), raw image bytes, and the
+ * rendered homepage article to prove a burger actually sees the welcome text.
  *
  * Image replacement uses the authenticated upload API rather than the UI: the
- * LOCAL Stagehand browser is CDP-based and cannot drive an OS file dialog, so
- * we POST to the very endpoint the beheer UI calls and assert the public effect.
+ * beheer image forms open an OS file dialog, so we POST to the very endpoint the
+ * beheer UI calls and assert the public effect.
  */
 
 const base = ENV.apps.burgerportaal.replace(/\/$/, '')
@@ -44,65 +42,109 @@ const FIXTURE_IMAGES: Record<ImageKind, { name: string, mimeType: string, file: 
   image: { name: 'sfeerfoto.png', mimeType: 'image/png', file: 'sfeerfoto.png' },
 }
 
-/** Public config field behind each footer link + its beheer form label. */
+/** Public config field behind each footer link (`/api/environment/resources`). */
 const FOOTER_FIELD: Record<string, string> = { privacy: 'privacyUrl', contact: 'contactUrl', toegankelijkheid: 'a11yUrl' }
-const FOOTER_LABEL: Record<string, string> = { privacy: 'Privacy', contact: 'Contact', toegankelijkheid: 'Toegankelijkheid' }
+/** Label of the beheer form field that sets it (BeheerLinksView.vue). */
+const FOOTER_LABEL: Record<string, string> = {
+  privacy: 'URL Privacy-verklaring',
+  contact: 'URL Contact-pagina',
+  toegankelijkheid: 'URL Toegankelijkheidsverklaring',
+}
+/** How the link reads in the public footer — a different wording (TheFooter.vue). */
+const FOOTER_PUBLIC_LABEL: Record<string, string> = { privacy: 'Privacy', contact: 'Contact', toegankelijkheid: 'Toegankelijkheid' }
 
 const POLL = { timeout: 20_000, intervals: [500, 1000, 2000] }
 
-// The @beheer feature is tagged @ai, so the shared @ai Before hook (in
-// @publicatiebank/@admin/steps.ts) already skips it without OPENROUTER_API_KEY
-// and off Chromium — no feature-specific guard needed here.
-
-Given('the burgerportaal beheer interface is open', async ({ stagehand }) => {
-  const page = stagehandPage(stagehand)
+/**
+ * Open a beheer section through the "Beheermenu" navigation, from `/beheer`.
+ *
+ * The menu renders the *active* item as a `<span>` and every other item as a
+ * link (BeheerLayout.vue), so "Homepage" — the landing route — has no link to
+ * click; the `count()` check covers both cases without a second code path.
+ */
+async function openBeheer(page: Page, item: 'Homepage' | 'Externe links'): Promise<void> {
   await page.goto(`${base}/beheer`)
-  await settle(page)
+  // Wait for the menu itself first: `count()` on a freshly loaded SPA route
+  // returns 0 before it renders, which silently skipped the click and left the
+  // scenario on the Homepage form.
+  const menu = page.getByRole('navigation', { name: 'Beheermenu' })
+  await menu.waitFor()
+  const link = menu.getByRole('link', { name: item, exact: true })
+  if (await link.count())
+    await link.click()
+}
+
+/**
+ * Replace the whole contents of the Welkomsttekst rich-text editor.
+ *
+ * Two CKEditor quirks to step around (CkEditorWrapper.vue):
+ *
+ * 1. It keeps its own model and re-renders the DOM from it, so a plain `fill()`
+ *    on the contenteditable gets reverted — select-all + typing is the input
+ *    path the editor itself listens on.
+ * 2. It syncs that model into the form's `v-model` *lazily*: mid-typing the
+ *    wrapper's mirror `<textarea>` still holds one keystroke. `blur()` flushes
+ *    it, but not synchronously — publishing straight after typing PUT'ed
+ *    `<p>E</p>` instead of the whole line. So wait for the mirror to actually
+ *    carry the text; that textarea is exactly what Publiceren submits.
+ */
+async function replaceWelcomeText(page: Page, text: string): Promise<void> {
+  const editor = page.locator('.ck-editor__editable[contenteditable=true]')
+  await editor.click()
+  await editor.press('ControlOrMeta+a')
+  await editor.pressSequentially(text)
+  await editor.blur()
+  await expect.poll(() => page.locator('.wrapper > textarea').inputValue(), POLL).toContain(text)
+}
+
+/** Submit a beheer form and wait for its success alert. */
+async function publish(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Publiceren' }).click()
+  await expect(page.getByText('Publiceren gelukt.')).toBeVisible()
+}
+
+Given('the burgerportaal beheer interface is open', async ({ page }) => {
+  await page.goto(`${base}/beheer`)
+  await expect(page.getByRole('navigation', { name: 'Beheermenu' })).toBeVisible()
 })
 
 // --- Welkomsttekst ---------------------------------------------------------
 
-When('I set the welcome text to {string}', async ({ stagehand, beheerState }, label: string) => {
+When('I set the welcome text to {string}', async ({ page, beheerState }, label: string) => {
   const token = uniqueToken()
   beheerState.expected.set('welcomeToken', token)
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Homepage" item in the beheer navigation menu')
-  await stagehand.act(`Replace the entire contents of the "Welkomsttekst" rich text editor with: ${label} ${token}`)
+  await openBeheer(page, 'Homepage')
+  await replaceWelcomeText(page, `${label} ${token}`)
 })
 
-When('I publish the homepage settings', async ({ stagehand }) => {
-  await stagehand.act('Click the "Publiceren" button to save the homepage settings')
-  await settle(stagehandPage(stagehand))
+When('I publish the homepage settings', async ({ page }) => {
+  await publish(page)
 })
 
-Then('the public homepage shows the new welcome text', async ({ stagehand, beheer, beheerState }) => {
+Then('the public homepage shows the new welcome text', async ({ page, beheer, beheerState }) => {
   const token = beheerState.expected.get('welcomeToken')!
   // Authoritative: the public config reflects the change.
   await expect.poll(() => resource(beheer, 'welcomeText'), POLL).toContain(token)
-  // And a burger sees it: extract the rendered homepage text via the AI browser.
-  const page = stagehandPage(stagehand)
+  // And a burger sees it: the homepage renders welcomeText into an <article>
+  // (HomeView.vue), both with and without a promotion video alongside it.
   await page.goto(`${base}/`)
-  await settle(page)
-  const extracted = await stagehand.extract('Extract the welcome text shown on the homepage', z.string())
-  expect(extracted ?? '').toContain(token)
+  await expect(page.locator('article.utrecht-article').first()).toContainText(token)
 })
 
 // --- Promotievideo ---------------------------------------------------------
 
-When('I set the promotion video URL to {string}', async ({ stagehand }, url: string) => {
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Homepage" item in the beheer navigation menu')
-  await stagehand.act(`Set the "Promotie- of instructievideo" URL field to: ${url}`)
+When('I set the promotion video URL to {string}', async ({ page }, url: string) => {
+  await openBeheer(page, 'Homepage')
+  await page.locator('#videoUrl').fill(url)
 })
 
 Then('the public homepage has a promotion video', async ({ beheer }) => {
   await expect.poll(() => resource(beheer, 'videoUrl'), POLL).not.toBe('')
 })
 
-When('I clear the promotion video URL', async ({ stagehand }) => {
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Homepage" item in the beheer navigation menu')
-  await stagehand.act('Clear the "Promotie- of instructievideo" URL field so it is empty')
+When('I clear the promotion video URL', async ({ page }) => {
+  await openBeheer(page, 'Homepage')
+  await page.locator('#videoUrl').clear()
 })
 
 Then('the public homepage has no promotion video', async ({ beheer }) => {
@@ -131,17 +173,15 @@ Then('the public {string} image has changed', async ({ beheer, beheerState }, ki
 
 // --- Externe links ---------------------------------------------------------
 
-When('I set the organisation website URL to {string}', async ({ stagehand, beheerState }, label: string) => {
+When('I set the organisation website URL to {string}', async ({ page, beheerState }, label: string) => {
   const url = `${label}-${uniqueToken()}`
   beheerState.expected.set('websiteUrl', url)
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Externe links" item in the beheer navigation menu')
-  await stagehand.act(`Set the "URL Website organisatie" field to: ${url}`)
+  await openBeheer(page, 'Externe links')
+  await page.getByLabel('URL Website organisatie').fill(url)
 })
 
-When('I publish the external links', async ({ stagehand }) => {
-  await stagehand.act('Click the "Publiceren" button to save the external links')
-  await settle(stagehandPage(stagehand))
+When('I publish the external links', async ({ page }) => {
+  await publish(page)
 })
 
 Then('the public organisation website URL matches', async ({ beheer, beheerState }) => {
@@ -149,12 +189,11 @@ Then('the public organisation website URL matches', async ({ beheer, beheerState
   await expect.poll(() => resource(beheer, 'websiteUrl'), POLL).toBe(url)
 })
 
-When('I set the {string} footer link to {string}', async ({ stagehand, beheerState }, which: string, label: string) => {
+When('I set the {string} footer link to {string}', async ({ page, beheerState }, which: string, label: string) => {
   const url = `${label}-${uniqueToken()}`
   beheerState.expected.set(`footer:${which}`, url)
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Externe links" item in the beheer navigation menu')
-  await stagehand.act(`Set the "${FOOTER_LABEL[which]}" URL field to: ${url}`)
+  await openBeheer(page, 'Externe links')
+  await page.getByLabel(FOOTER_LABEL[which]).fill(url)
 })
 
 Then('the public {string} footer link matches', async ({ beheer, beheerState }, which: string) => {
@@ -162,10 +201,9 @@ Then('the public {string} footer link matches', async ({ beheer, beheerState }, 
   await expect.poll(() => resource(beheer, FOOTER_FIELD[which]), POLL).toBe(url)
 })
 
-When('I remove the {string} footer link', async ({ stagehand }, which: string) => {
-  await stagehandPage(stagehand).goto(`${base}/beheer`)
-  await stagehand.act('Open the "Externe links" item in the beheer navigation menu')
-  await stagehand.act(`Clear the "${FOOTER_LABEL[which]}" URL field so it is empty`)
+When('I remove the {string} footer link', async ({ page }, which: string) => {
+  await openBeheer(page, 'Externe links')
+  await page.getByLabel(FOOTER_LABEL[which]).clear()
 })
 
 Then('the public {string} footer link is empty', async ({ beheer }, which: string) => {
@@ -230,17 +268,17 @@ Then('the "Naar de gemeente" link points to the new organisation website URL', a
   throw new Error(`TODO: assert the "Naar de gemeente" link href equals ${url}`)
 })
 
-// Implement: page.goto(`${base}/`), locate the footer anchor by its label
-// (FOOTER_LABEL[which]) and assert its href equals beheerState.expected
+// Implement: page.goto(`${base}/`), locate the footer anchor by its public label
+// (FOOTER_PUBLIC_LABEL[which]) and assert its href equals beheerState.expected
 // .get(`footer:${which}`).
 Then('the public {string} footer link points to the new URL', async ({ beheerState }, which: string) => {
   const url = beheerState.expected.get(`footer:${which}`)!
-  throw new Error(`TODO: assert the "${FOOTER_LABEL[which]}" footer link href equals ${url}`)
+  throw new Error(`TODO: assert the "${FOOTER_PUBLIC_LABEL[which]}" footer link href equals ${url}`)
 })
 
 // Implement: page.goto(`${base}/`), assert the footer anchor labelled
-// FOOTER_LABEL[which] is no longer rendered (locator count 0) once its URL was
-// removed and republished.
+// FOOTER_PUBLIC_LABEL[which] is no longer rendered (locator count 0) once its
+// URL was removed and republished.
 Then('the public {string} footer link is no longer shown', async ({}, which: string) => {
-  throw new Error(`TODO: assert the "${FOOTER_LABEL[which]}" footer link is no longer rendered in the footer`)
+  throw new Error(`TODO: assert the "${FOOTER_PUBLIC_LABEL[which]}" footer link is no longer rendered in the footer`)
 })

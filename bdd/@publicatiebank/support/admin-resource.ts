@@ -11,8 +11,8 @@ import { expect } from '@playwright/test'
  * differs only in a handful of selectors. This module captures that script once;
  * each entity is a small {@link AdminResourceConfig} rather than a copy of the
  * whole flow. Reads/deletes go through the session `page` (a real user) because
- * the token API is unreliable while Stagehand drives the same admin (see README
- * "Known server flake").
+ * the token API is unreliable while an admin session mutates the same server
+ * (see README "Known server flake").
  *
  * Bespoke add-form filling (a topic's mandatory afbeelding, a publicatie's
  * publisher + select2) stays in the per-entity helper — only the shared
@@ -46,6 +46,8 @@ export interface AdminResource {
   exists: (page: Page, name: string) => Promise<boolean>
   /** Open the change page of the row with this name; false if none exists. */
   open: (page: Page, name: string) => Promise<boolean>
+  /** Delete-with-confirm the change page that is currently open. */
+  deleteOpen: (page: Page) => Promise<void>
   /** Delete the row with this name via the admin. No-op if already gone. */
   remove: (page: Page, name: string) => Promise<void>
 }
@@ -88,9 +90,22 @@ export function adminResource(config: AdminResourceConfig): AdminResource {
     return true
   }
 
+  /** Delete-with-confirm whatever change page is currently open. */
+  async function deleteOpen(page: Page) {
+    // The publicatie change page also carries an eigenaar-inline "verwijderen"
+    // link, so target the main delete link by class rather than accessible name.
+    if (deleteVia === 'deletelink')
+      await page.locator('a.deletelink').click()
+    else
+      await page.getByRole('link', { name: 'Verwijderen' }).click()
+    await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
+    await expect(page).toHaveURL(changelistRe)
+  }
+
   return {
     changelistUrl,
     addFormUrl,
+    deleteOpen,
     async assertOnChangelist(page) {
       await expect(page).toHaveURL(changelistRe)
     },
@@ -114,14 +129,7 @@ export function adminResource(config: AdminResourceConfig): AdminResource {
       await gotoSearch(page, name)
       if (!(await findRow(page, name, true)))
         return
-      // The publicatie change page also carries an eigenaar-inline "verwijderen"
-      // link, so target the main delete link by class rather than accessible name.
-      if (deleteVia === 'deletelink')
-        await page.locator('a.deletelink').click()
-      else
-        await page.getByRole('link', { name: 'Verwijderen' }).click()
-      await page.getByRole('button', { name: /Ja, ik weet het zeker/i }).click()
-      await expect(page).toHaveURL(changelistRe)
+      await deleteOpen(page)
     },
   }
 }

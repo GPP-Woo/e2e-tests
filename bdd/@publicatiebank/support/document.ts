@@ -29,7 +29,8 @@ const ODRC_HOST = process.env.ODRC_INTERNAL_HOST ?? 'gpp-publicatiebank-nginx.gp
 const EXTERNAL_ORIGIN = new URL(ENV.odrc.baseUrl).origin
 const API_BASE = `${EXTERNAL_ORIGIN}/api/v2/`
 
-const resource = adminResource({
+/** Shared Django-admin changelist mechanics for this entity (also drives its `adminDriver`). */
+export const resource = adminResource({
   path: 'publications/document',
   rowMatch: 'result-row',
   changeId: '[0-9a-f-]+',

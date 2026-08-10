@@ -94,29 +94,65 @@ provision portably:
   the **1-minute cache override** the testscript calls out as a testomgeving
   pre-set (sitemaps are cached ~24h by default).
 
-### Burgerportaal beheer (Testscript 1 — Stagehand + OpenRouter)
+### Burgerportaal beheer (Testscript 1 — deterministic beheer UI)
 
 The `@beheer` scenarios configure the burgerportaal (welkomsttekst, video, logo,
 favicon, sfeerfoto, organisatie-URL, voettekst-links) through its **beheer**
-interface and verify the result on the public site. They are driven by
-[**Stagehand**](https://docs.stagehand.dev) — an AI browser-automation layer
-whose `act()`/`extract()` operate the UI from natural-language intent — backed
-by a model served through [**OpenRouter**](https://openrouter.ai). They need:
+interface and verify the result on the public site. Both halves run through the
+ordinary Playwright `page` with locators on the beheer form's Dutch labels
+(`#videoUrl`, `getByLabel('URL Privacy-verklaring')`, the CKEditor
+contenteditable for the Welkomsttekst). They need:
 
-- **`OPENROUTER_API_KEY`** in `.env` (get one at
-  <https://openrouter.ai/keys>). **Without it every `@beheer` scenario skips**,
-  so the rest of the suite still runs.
 - The **burgerportaal wired to ODRC** (same as the sitemap, above) and the
   **beheer admin session** — established automatically by `setup/auth.setup.ts`
   (it piggybacks the admin SSO session, so no extra TOTP) and saved to
   `.auth/burgerportaal-admin.json`.
 
+Run them: `npm run test:beheer` (add `--no-deps` to skip auth setup).
+
+**How it stays portable + test-owned.** Assertions go against the public site —
+the config API (`/api/environment/resources`), the rendered homepage `<article>`,
+and raw image bytes. The `beheer` fixture ([`bdd/_core/fixture.ts`](./bdd/_core/fixture.ts))
+snapshots the full config before each scenario and restores it afterwards, so
+runs — including against shared/production environments — leave the portal
+exactly as found. Image _replacement_ uses the authenticated upload API (the same
+endpoint the beheer UI calls), because a browser cannot drive an OS file-picker
+dialog.
+
+### AI browser automation (Stagehand + OpenRouter — wired, currently unused)
+
+Every scenario in this suite drives the UI with plain Playwright locators. The
+apps under test are a Django admin and two Vue SPAs whose fields carry stable
+ids and labelled inputs, so hand-written locators are both cheaper and steadier
+than natural-language actions — the AI layer was the source of essentially every
+flake it was measured against.
+
+The [**Stagehand**](https://docs.stagehand.dev) plumbing is nevertheless kept
+intact and ready, for a future flow where the DOM genuinely is not addressable:
+
+- [`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts) — the
+  [OpenRouter](https://openrouter.ai) client, the role × tier model table, and
+  the CDP attach that makes Stagehand adopt the *same* page Playwright traces.
+- The `stagehand` / `adminStagehand` fixtures in
+  [`bdd/_core/core-fixtures.ts`](./bdd/_core/core-fixtures.ts). A Playwright
+  fixture is only built when a step destructures it, so these cost nothing while
+  unused.
+- The `@ai` `Before` guard in
+  [`bdd/@publicatiebank/@admin/_shared.steps.ts`](./bdd/@publicatiebank/@admin/_shared.steps.ts):
+  skips without `OPENROUTER_API_KEY` (so the suite stays green without a model
+  key) and off Chromium (Stagehand attaches over CDP, which only Chromium
+  exposes — the `--remote-debugging-port` is already open in
+  `playwright.config.ts`).
+
+**To use it:** put `OPENROUTER_API_KEY` in `.env` (<https://openrouter.ai/keys>),
+tag the scenario `@ai`, take the `stagehand` (or `adminStagehand`) fixture in the
+step, and call `act()` / `extract()` / `observe()`.
+
 #### AI model routing (cost control)
 
-Every Stagehand operation maps to one of three **roles**, and each role picks a
-model by the scenario's **tier** tag. The table lives in
-[`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts) (`ROLE_MODELS`); a run
-routes each call to its own model automatically — no per-step wiring.
+Each Stagehand operation maps to a **role**, and each role picks a model by the
+scenario's **tier** tag. The table lives in `ROLE_MODELS`; a run routes each call
+to its own model automatically — no per-step wiring.
 
 | Role (Stagehand op)            | `@cheap-ai`             | _(no tag)_ — default | `@expensive-ai`     |
 | ------------------------------ | ----------------------- | -------------------- | ------------------- |
@@ -124,71 +160,32 @@ routes each call to its own model automatically — no per-step wiring.
 | **verification** — `extract()` | `gemini-2.5-flash-lite` | `gpt-4o-mini`        | `claude-sonnet-4.5` |
 | **planner** — `observe()`      | `deepseek-chat` (V3)    | `deepseek-chat` (V3) | `claude-sonnet-4.5` |
 
-**Which tier for which scenario (tag the Feature or Scenario):**
+Override a specific model when a tier isn't what you want: a
+`@model:<openrouter-id>` tag (e.g. `@model:openai/gpt-4.1`) for a whole
+scenario, or `stagehand.withModel()` around a single step — the model is
+restored after the callback.
 
-- **No tag → default.** Use for ~everything. This suite is ~98% `act()`
-  (worker), so nearly all cost is the worker model, kept on cheap `gpt-4o-mini`
-  (chosen over `gemini-2.5-flash`, which intermittently returns malformed action
-  JSON that fails Stagehand's schema validation).
-- **`@cheap-ai`** — throwaway/high-volume scenarios where a wrong click just
-  retries. Shifts every role down a tier.
-- **`@expensive-ai`** — genuinely flaky or high-value flows that justify paying
-  for Claude across all roles. All AI features currently run **untagged on the
-  cheap default** — add this per-feature only if a flow proves unreliable.
+```ts
+await stagehand.withModel('anthropic/claude-sonnet-4.5', () =>
+  stagehand.act('the one flaky action'))
+```
 
-**Override a specific model** when a tier isn't what you want:
-
-- **Whole scenario/feature** — add a `@model:<openrouter-id>` tag, e.g.
-  `@model:openai/gpt-4.1`. It beats tier + role routing for every op in that
-  scenario.
-- **A single step** (or a few) — wrap the calls in `stagehand.withModel()`:
-
-  ```ts
-  await stagehand.withModel('anthropic/claude-sonnet-4.5', () =>
-    stagehand.act('the one flaky action'))
-  ```
-
-  The model is restored automatically after the callback.
-
-**Marker tag:** `@ai` marks a scenario as Stagehand-driven; it drives the
-skip-guard that skips these scenarios when `OPENROUTER_API_KEY` is unset
-(`@beheer` scenarios have their own guard). Every AI scenario needs `@ai` (or
-`@beheer`).
-
-> **planner is unused today** (0 `observe()` calls) — its row is wired and ready
-> for when the suite adopts `stagehand.agent()`/`observe()`. To add a model,
-> edit one cell in `ROLE_MODELS`.
-
-_Removed legacy:_ the old `@anthropic`/`@openai` provider-pin tags are gone —
-`@anthropic` is now `@ai @expensive-ai`, and arbitrary models use `@model:`.
-
-Run them: `npm run test:beheer` (add `--no-deps` to skip auth setup; set
-`HEADED=1` to watch the AI browser). Self-check the routing table with
+Self-check the routing table with
 `node --experimental-strip-types checks/stagehand-routing.check.ts`.
 
-**How it stays portable + test-owned.** Only the UI _mutations_ go through the
-AI (`act()`); assertions are deterministic against the public site — the config
-API (`/api/environment/resources`), the rendered DOM (one `extract()`), and raw
-image bytes. The `beheer` fixture ([`bdd/_core/fixture.ts`](./bdd/_core/fixture.ts))
-snapshots the full config before each scenario and restores it afterwards, so
-runs — including against shared/production environments — leave the portal
-exactly as found. Image _replacement_ uses the authenticated upload API (the
-same endpoint the beheer UI calls), because the local Stagehand browser is
-CDP-based and cannot drive an OS file-picker dialog.
-
-### Metadata beheer (Testscripts 3 & 4 — Stagehand + deterministic admin reads)
+### Metadata beheer (Testscripts 3 & 4 — admin UI + admin reads)
 
 The `@publicatiebank/@admin` **organisaties** (Testscript 4) and **onderwerpen**
-(Testscript 3) scenarios follow the same split as `@beheer`: an AI agent
-(**Stagehand** + an OpenRouter model) drives the Dutch Django-admin UI from
-natural-language intent for every _mutation_ (add / activate / promote / rename
-/ edit / delete / search) — no hand-written selectors for the action under test.
-Assertions are made **deterministically by reading the admin back through the
-ordinary Playwright `page`** — a _separate_, session-authenticated browser whose
-reads are stable (unlike the token API, see the flake note below). They need:
+(Testscript 3) scenarios drive the Dutch Django-admin UI for every _mutation_
+(add / activate / promote / rename / edit / delete / search) and assert by
+**reading the admin back through the same session-authenticated `page`**, whose
+reads are stable (unlike the token API — see the flake note below).
 
-- **`OPENROUTER_API_KEY`** — **without it every organisatie/onderwerp scenario
-  skips** (a `Before` hook on `@anthropic`), like `@beheer`.
+The shared changelist script (search a row, open it, save, delete-with-confirm)
+lives once in [`support/admin-resource.ts`](./bdd/@publicatiebank/support/admin-resource.ts);
+[`support/admin-driver.ts`](./bdd/@publicatiebank/support/admin-driver.ts) binds
+it to a noun and is handed to steps as the `topicAdmin` / `pubAdmin` / `docAdmin`
+fixtures. Bespoke per-field work (a select2, an inline formset) stays in the step.
 
 The [`OdrcClient`](./bdd/@publicatiebank/support/odrc.ts) (token + `Audit-*` headers,
 `ODRC_BASE_URL`/`ODRC_API_KEY` from `.env`) is **not** used to verify these two
@@ -197,10 +194,9 @@ publicatie/document scenarios, whose resources expose full create/delete.
 
 **Carve-outs, honestly.** Reality forced two:
 
-- **Onderwerp afbeelding upload.** The add form requires an image and a CDP
-  browser cannot drive an OS file-picker, so the file bytes are set straight on
-  the `<input type=file>` (same carve-out `@beheer` makes for images); every
-  other field is still driven by Stagehand.
+- **Onderwerp afbeelding upload.** The add form requires an image and a browser
+  cannot drive an OS file-picker, so the file bytes are set straight on the
+  `<input type=file>` (same carve-out `@beheer` makes for images).
 - **Cleanup is deterministic.** The organisatie API has no `DELETE` and the
   onderwerp API is `GET`-only, so the `organisations`/`topics` fixtures
   ([`bdd/_core/fixture.ts`](./bdd/_core/fixture.ts)) delete their rows through the admin, and
@@ -210,42 +206,41 @@ publicatie/document scenarios, whose resources expose full create/delete.
 as a _user-less_ token, and woo-publications' `SessionProfileMiddleware`
 dereferences a `None` user (500 `AttributeError`) whenever a token API request
 runs while an admin session is active on the _same_ server — exactly the case
-here, because Stagehand is driving that admin. So these two features **verify by
-reading the admin back through the ordinary session-authenticated `page`**
-(reads authenticate as a real user, so they never hit the `None`-user path)
-rather than through the token API. `@mode:serial` (and running these
-`--workers=1`) keeps concurrent load down. This is a server-side bug, not a test
-bug; reading the admin keeps verification deterministic regardless. The same
-lesson applies to **Testscript 9** below: under a real run the token API 500s
-_persistently_ while Stagehand drives the admin, so publicaties are seeded,
-verified and cleaned up through the admin UI too — never the token API.
+here, because these scenarios drive that admin. So they **verify by reading the
+admin back through the session-authenticated `page`** (reads authenticate as a
+real user, so they never hit the `None`-user path) rather than through the token
+API. `@mode:serial` (and running these `--workers=1`) keeps concurrent load down.
+This is a server-side bug, not a test bug. The same lesson applies to
+**Testscript 9** below: under a real run the token API 500s _persistently_ while
+an admin session is open, so publicaties are seeded, verified and cleaned up
+through the admin UI too — never the token API.
 
-### Publicatie beheer (Testscript 9 — Stagehand + admin reads)
+### Publicatie beheer (Testscript 9 — admin UI + admin reads)
 
 `@publicatiebank/@admin` **publicaties** (`publicaties.feature`) mirror
-Testscripts 3 & 4: Stagehand drives the Django-admin mutations (edit omschrijving,
-rename, withdraw, delete, search), verified by reading the admin back through the
-ordinary `page`. Publicaties are seeded through the admin add form (a `concept`
-needs only a titel; the withdraw scenario seeds a `gepubliceerd` one — publisher
-is a raw-id field filled with the org's admin PK, informatiecategorie a select2)
-and cleaned up through the admin ([`bdd/@publicatiebank/support/publication.ts`](./bdd/@publicatiebank/support/publication.ts),
-`publications` fixture). Needs `OPENROUTER_API_KEY` (else skips).
+Testscripts 3 & 4: the Django-admin mutations (edit omschrijving, rename,
+withdraw, delete, search) verified by reading the admin back through the same
+`page`. Publicaties are seeded through the admin add form (a `concept` needs only
+a titel; the withdraw scenario seeds a `gepubliceerd` one — publisher is a raw-id
+field filled with the org's admin PK, informatiecategorie a select2) and cleaned
+up through the admin ([`bdd/@publicatiebank/support/publication.ts`](./bdd/@publicatiebank/support/publication.ts),
+`publications` fixture).
 
-### Gebruikersgroepen (Testscript 5 — Stagehand + odpc API)
+### Gebruikersgroepen (Testscript 5 — GPP-app SPA + odpc API)
 
-`@gpp-app` **gebruikersgroepen** (`gebruikersgroepen.feature`): Stagehand drives
-the GPP-app SPA (create / rename / delete a group); verification and cleanup go
-through the odpc JSON API `/api/gebruikersgroepen` ([`bdd/@gpp-app/support/usergroup.ts`](./bdd/@gpp-app/support/usergroup.ts),
-`usergroups` fixture). The GPP-app is cookie-authenticated, so `adminStagehand`'s
-`adminState` cookies sign it in; the SPA hydrates routes only via click-navigation
-from the app root (deep-links render nothing). The admin account carries the
-AD-beheerder role. Needs `OPENROUTER_API_KEY` (else skips).
+`@gpp-app` **gebruikersgroepen** (`gebruikersgroepen.feature`): the GPP-app SPA
+is driven through the ordinary `page` (create / rename / delete a group);
+verification and cleanup go through the odpc JSON API `/api/gebruikersgroepen`
+([`bdd/@gpp-app/support/usergroup.ts`](./bdd/@gpp-app/support/usergroup.ts),
+`usergroups` fixture). The GPP-app is cookie-authenticated, so the `@admin`
+storage state signs it in; the SPA hydrates routes only via click-navigation from
+the app root (deep-links render nothing). The admin account carries the
+AD-beheerder role.
 
 ### Burger zoeken en raadplegen (Testscript 11 — deterministic, public)
 
 `@burgerportaal` **zoeken** (`zoeken.feature`) is read-only against the public
-portal, so it runs deterministically through the ordinary `page` (no Stagehand /
-no OpenRouter). It seeds a promoted, published onderwerp (served live from the
+portal, so it runs read-only through the ordinary `page`. It seeds a promoted, published onderwerp (served live from the
 publicatiebank, browsable in seconds) and asserts onderwerpen-browsing plus the
 search _experience_ (the `/zoeken` results page opens).
 
@@ -255,11 +250,7 @@ These are present as `@blocked` features that **skip with a reason** (visible in
 the report — never faked green):
 
 - **Testscript 8** (document beheer, `documenten.feature`) — implemented, seed
-  works, but **`@fixme`-quarantined** on the "withdraw through the admin" step:
-  `adminDriver.open()`'s Stagehand row-click doesn't reliably land on the
-  _document_ change page (its changelist row link differs from the publicatie
-  one), so the deterministic `#id_publicatiestatus` selectOption fails. Fix by
-  navigating to the change page by URL. Also needs **`setup/provision-documenten-api.sh`
+  works, but needs **`setup/provision-documenten-api.sh`
   run once per fresh stack** (wires the Documenten API + live-patches ODRC token
   auth to `AnonymousUser`, without which the cookieless token seed 500s in the
   sessionprofile middleware; a `docker compose down`/`up` reverts it — re-run the
@@ -319,12 +310,12 @@ bdd/
 │   ├── resource-manager.ts       # makeResourceManager() — shared own-and-cleanup lifecycle
 │   ├── signIn.ts                 # app-dispatching Keycloak sign-in
 │   ├── keycloak.ts               # Keycloak login form + TOTP + SSO-or-redirect race
-│   └── stagehand.ts              # Stagehand/OpenRouter wiring + stagehandPage()/settle()
+│   └── stagehand.ts              # Stagehand/OpenRouter wiring (unused — see "AI browser automation")
 ├── @gpp-app/                     # tag: @gpp-app
 │   ├── support/                  # login.ts · usergroup.ts (odpc API) · hydrate.ts
 │   ├── authentication.feature
 │   ├── steps.ts
-│   ├── gebruikersgroepen.feature       # Testscript 5 — Stagehand + odpc API
+│   ├── gebruikersgroepen.feature       # Testscript 5 — SPA + odpc API
 │   ├── gebruikersgroepen-steps.ts
 │   ├── publicaties.feature             # Testscripts 6 & 7 — PARKED (@blocked)
 │   └── publicaties-steps.ts
@@ -334,7 +325,7 @@ bdd/
 │   ├── steps.ts
 │   ├── zoeken.feature                  # Testscript 11 — deterministic (no AI)
 │   ├── zoeken-steps.ts
-│   └── @beheer/                  # tag: @beheer (Stagehand + OpenRouter config UI)
+│   └── @beheer/                  # tag: @beheer (burgerportaal config UI)
 │       ├── configuratie.feature
 │       ├── steps.ts
 │       └── fixtures/            # test images (logo.svg, favicon.png, sfeerfoto.png)
@@ -344,9 +335,9 @@ bdd/
     ├── steps.ts
     └── @admin/                   # tag: @admin (in addition to @publicatiebank)
         ├── informatiecategorieen.feature   # deterministic Playwright (no AI)
-        ├── organisaties.feature            # Testscript 4 — Stagehand + admin reads
-        ├── onderwerpen.feature             # Testscript 3 — Stagehand + admin reads
-        ├── publicaties.feature             # Testscript 9 — Stagehand + admin reads
+        ├── organisaties.feature            # Testscript 4 — admin UI + admin reads
+        ├── onderwerpen.feature             # Testscript 3 — admin UI + admin reads
+        ├── publicaties.feature             # Testscript 9 — admin UI + admin reads
         ├── documenten.feature              # Testscript 8 — PARKED (@blocked)
         ├── steps.ts                        # organisatie steps
         ├── onderwerpen-steps.ts            # onderwerp steps
@@ -363,7 +354,7 @@ setup/                            # kept out of ./bdd so bddgen ignores it
 A vertical's `support/` code is meant to be imported by that vertical's steps
 (and by the composition roots — `_core/fixture.ts`, `_core/signIn.ts`,
 `setup/`). `_core/` holds only things genuinely shared across verticals
-(Keycloak, Stagehand plumbing, the ENV parser, the fixture graph); it never
+(Keycloak, the Stagehand plumbing, the ENV parser, the fixture graph); it never
 imports _from_ a vertical except in those composition roots.
 
 ## Authentication by tag
@@ -384,10 +375,10 @@ playwright-bdd's `$tags`):
 | `@regular`  | `DEFAULT_*` (GPP-app) |
 | _(neither)_ | none — signed out     |
 
-The `@beheer` scenarios are a special case: their Playwright `page` is
-signed-out, but Stagehand's own browser gets the saved
-`.auth/burgerportaal-admin.json` session injected as cookies (see
-[`bdd/_core/stagehand.ts`](./bdd/_core/stagehand.ts)).
+The `@beheer` scenarios are a special case: the burgerportaal beheer app is a
+separate OIDC client (`odbp`) with its own cookie session, so `@beheer` selects
+the saved `.auth/burgerportaal-admin.json` state instead of `@admin`'s (see
+[`bdd/_core/roles.ts`](./bdd/_core/roles.ts)).
 
 Because `@admin` comes from the folder name, a feature placed in
 `bdd/@publicatiebank/@admin/` runs as admin without any tag in the `.feature`
@@ -398,8 +389,8 @@ is already present.
 > already applies every `@`-prefixed path segment, so a feature under
 > `bdd/@publicatiebank/@admin/` is `@publicatiebank @admin` automatically —
 > writing `@publicatiebank @admin` again on the feature line is redundant noise.
-> Only put tags there that the path does **not** give you: `@ai`, `@expensive-ai`,
-> `@mode:serial`, `@timeout:…`, `@no-webkit`, `@fixme`, or a functional
+> Only put tags there that the path does **not** give you: `@chromium-only`,
+> `@mode:serial`, `@timeout:…`, `@no-webkit`, `@fixme`, `@ai`, or a functional
 > `@admin`/`@regular` when the folder isn't already one of those. The GPP-app **authentication** feature is the exception: it
 > is untagged (no restored session) and signs in **live** through a step, so it
 > actually exercises the login flow. `ENV.users` lives in
@@ -419,6 +410,6 @@ npm run test:admin            # bddgen && playwright test --grep @admin
 npm run test:gpp-app
 npm run test:publicatiebank
 npm run test:burgerportaal      # public sitemap; add --no-deps to skip auth setup
-npm run test:beheer             # Stagehand config UI (needs OPENROUTER_API_KEY)
+npm run test:beheer             # burgerportaal config UI
 npx playwright test --grep "@publicatiebank and not @admin"
 ```

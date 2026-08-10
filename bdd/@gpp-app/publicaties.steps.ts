@@ -280,7 +280,7 @@ Then('the publicatie opens with its saved details', async ({ page, publications 
 
 // ===========================================================================
 // @todo stubs — gaps between the manual testscripts (TS6/TS7) and the two
-// green scenarios above. These throw until the gpp-app Stagehand driver
+// green scenarios above. These throw until the gpp-app driver
 // (support/publicatie-ui.ts) grows the matching helpers; the global
 // Before({tags:'@todo'}) hook skips the scenarios so bddgen stays green.
 // ===========================================================================
@@ -356,7 +356,7 @@ Then('the edited titel of the publicatie has persisted', async ({ page, publicat
 
 When('I withdraw a single document on the publicatie and save it', async () => {
   // Open a document on the publicatie, click its "intrekken", then save the publicatie.
-  throw new Error('TODO: withdraw a single document and save (Stagehand act)')
+  throw new Error('TODO: withdraw a single document and save')
 })
 
 Then('the withdrawn document is still withdrawn', async () => {
@@ -405,10 +405,9 @@ Then('the Bekijk online button is no longer shown on the publicatie', async ({ p
   await expect(bekijkOnlineLink(page)).toHaveCount(0)
 })
 
-Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ authProfile, adminStagehand, publications, scratch }) => {
+Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ authProfile, publications, scratch }) => {
   // Seed a shared gebruikersgroep + a published publicatie owned by a *different* member (colleague) via API/admin.
   void authProfile
-  void adminStagehand
   void publications
   void scratch
   throw new Error('TODO: seed a colleague-owned published publicatie in a shared gebruikersgroep')
@@ -416,7 +415,7 @@ Given('a published publicatie owned by a colleague in my gebruikersgroep', async
 
 When('I open a colleague publicatie under the collega publicaties menu and choose a profiel', async () => {
   // Navigate root -> "Publicaties van collega's", choose the profiel when prompted, open the colleague publicatie.
-  throw new Error('TODO: open a colleague publicatie via "Publicaties van collega\'s" choosing a profiel (Stagehand act)')
+  throw new Error('TODO: open a colleague publicatie via "Publicaties van collega\'s" choosing a profiel')
 })
 
 Then('the current publicatie-eigenaar is shown before I claim it', async () => {

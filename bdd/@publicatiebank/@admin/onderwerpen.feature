@@ -2,28 +2,22 @@
 #
 # A functioneel-beheerder manages onderwerpen (topics) in the GPP-publicatiebank
 # admin: adding one (with its mandatory afbeelding), promoting it, editing it and
-# deleting it. UI *mutations* are driven by an AI agent (Stagehand + an OpenRouter
-# model) operating the Dutch Django-admin from natural-language intent — no
-# hand-written selectors. The one exception is the mandatory image on the add
-# form: a CDP browser cannot drive the OS file-picker, so the file bytes are set
-# directly on the <input type=file> (the same carve-out the @beheer feature makes
-# for image uploads); every other field is still driven by Stagehand.
+# deleting it. UI *mutations* run through the Dutch Django-admin with plain
+# Playwright locators; the mandatory image on the add form is set directly on the
+# <input type=file>, since a file-picker cannot be driven any other way.
 #
-# Assertions are made deterministically by reading the admin back through a
-# separate, session-authenticated Playwright browser (the token API is
-# unreliable while Stagehand drives the same server — see README "Known server
-# flake").
+# Assertions read the admin back through the same session-authenticated `page`
+# (the token API is unreliable while an admin session mutates the same server —
+# see README "Known server flake").
 #
 # Test-owned data: each scenario's onderwerp is deleted again by the `topics`
 # fixture (bdd/fixture.ts) in teardown, deterministically via the admin (the
 # onderwerpen API is read-only). Test onderwerpen are created as `concept`, so
 # they never surface publicly on the burgerportaal. Names are unique per worker.
-#
-# Requires OPENROUTER_API_KEY (else every scenario skips) — see README.
 
-# @timeout — Stagehand act() calls (each an LLM round-trip) plus API polling
-# comfortably exceed the 30s default.
-@ai @mode:serial @timeout:120000
+# @timeout — admin round-trips plus the changelist polling can exceed the 30s
+# default on a loaded stack.
+@chromium-only @mode:serial @timeout:120000
 Feature: Configureren van onderwerpen
   As a functioneel-beheerder of the GPP-publicatiebank
   I want to add, promote, edit and delete onderwerpen
@@ -41,9 +35,6 @@ Feature: Configureren van onderwerpen
     When I tick the "Promoot" checkbox and save the onderwerp
     Then the onderwerp is promoted in the API
 
-  # @expensive-ai — the omschrijving edit act flakes on the default model (field
-  # left blank); Claude Sonnet applies it reliably.
-  @expensive-ai
   Scenario: Edit the omschrijving of an onderwerp
     Given an onderwerp
     When I change the onderwerp omschrijving and save it

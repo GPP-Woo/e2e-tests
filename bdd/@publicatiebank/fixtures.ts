@@ -131,11 +131,11 @@ export interface PublicatiebankFixtures {
   publications: PublicationManager
   /** Test-owned documents (seeded via the token API, cleaned up via the admin). */
   documents: DocumentManager
-  /** Django-admin CRUD driver for onderwerpen, bound to `adminStagehand`. */
+  /** Django-admin CRUD driver for onderwerpen, bound to the session `page`. */
   topicAdmin: AdminDriver
-  /** Django-admin CRUD driver for publicaties, bound to `adminStagehand`. */
+  /** Django-admin CRUD driver for publicaties, bound to the session `page`. */
   pubAdmin: AdminDriver
-  /** Django-admin CRUD driver for documenten, bound to `adminStagehand`. */
+  /** Django-admin CRUD driver for documenten, bound to the session `page`. */
   docAdmin: AdminDriver
 }
 
@@ -220,16 +220,15 @@ export const publicatiebankTest = coreTest.extend<PublicatiebankFixtures>({
     await use(manager)
     await teardown()
   },
-  // Page-object drivers bound to the shared adminStagehand browser. Lazy: only
-  // the noun a scenario destructures is built, and all three share one browser
-  // if a scenario needs more than one.
-  topicAdmin: async ({ adminStagehand }, use) => {
-    await use(adminDriver(adminStagehand, TOPIC_ADMIN))
+  // Page-object drivers over the session-authenticated `page` — the same tab the
+  // assertions read back, so a mutation and its verification never disagree.
+  topicAdmin: async ({ page }, use) => {
+    await use(adminDriver(page, TOPIC_ADMIN))
   },
-  pubAdmin: async ({ adminStagehand }, use) => {
-    await use(adminDriver(adminStagehand, PUBLICATION_ADMIN))
+  pubAdmin: async ({ page }, use) => {
+    await use(adminDriver(page, PUBLICATION_ADMIN))
   },
-  docAdmin: async ({ adminStagehand }, use) => {
-    await use(adminDriver(adminStagehand, DOCUMENT_ADMIN))
+  docAdmin: async ({ page }, use) => {
+    await use(adminDriver(page, DOCUMENT_ADMIN))
   },
 })

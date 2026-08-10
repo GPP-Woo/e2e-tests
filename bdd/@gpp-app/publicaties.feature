@@ -4,23 +4,23 @@
 # requires the signed-in user to be a member of a gebruikersgroep authorised for an
 # organisatie + informatiecategorie (the "profiel"); the `authProfile` fixture
 # seeds that prerequisite over the odpc API (the group *UI* is what TS5 covers).
-# Stagehand `act()` drives the SPA — root → Mijn publicaties → Nieuwe publicatie —
-# and publishes "zonder documenten" (this stack has no Documents API; documents are
-# TS8). The result is verified *deterministically* by reading the publicatiestatus
+# Plain Playwright locators drive the SPA — root → Mijn publicaties → Nieuwe
+# publicatie — and publish "zonder documenten" (this stack has no Documents API;
+# documents are TS8). The result is verified by reading the publicatiestatus
 # back through the publicatiebank Django admin (session-authenticated, stable): a
 # `gepubliceerd` publicatie is what makes it public, and burgerportaal/ES visibility
 # lags indexing so it is not asserted here (see README "Known server flake").
 # `@admin` loads the admin storage state (adminState) into the ordinary `page`
 # fixture: the authorised-group + organisatie seeding and the publicatiestatus
 # read-back both go through the session-authenticated publicatiebank admin.
-# The withdraw scenario seeds its publicatie through the same (slow) Stagehand
-# publish flow before withdrawing, so the whole feature runs on a 240s budget.
-@admin @ai @mode:serial @timeout:240000
+# The withdraw scenario seeds its publicatie through the same (slow) publish
+# flow before withdrawing, so the whole feature runs on a 240s budget.
+#
+# @chromium-only — the SPA publish flow is only exercised on one browser project;
+# the scenarios share seeded publicaties and must not run concurrently.
+@admin @chromium-only @mode:serial @timeout:240000
 Feature: Publicaties creëren en intrekken in de GPP-app
 
-  # @expensive-ai — the multi-step create+publish wizard flakes on the default
-  # model (publicatie left unpublished); Claude Sonnet completes it reliably.
-  @expensive-ai
   Scenario: Create a publicatie
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I create and publish a publicatie through the gpp-app

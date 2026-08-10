@@ -35,9 +35,8 @@ export function listE2EOrganisationNames(page: Page, prefix = 'E2E ') {
 
 /**
  * Whether an organisatie with exactly this naam exists, read from the admin
- * changelist. Deterministic verification for the Stagehand-driven scenarios
- * (the token API is unreliable while Stagehand drives the same admin — see
- * README). Requires an admin session.
+ * changelist. Deterministic verification for the admin-driven scenarios (the token API is
+ * unreliable while an admin session mutates the same server — see README). Requires an admin session.
  */
 export function organisationExists(page: Page, naam: string): Promise<boolean> {
   return resource.exists(page, naam)

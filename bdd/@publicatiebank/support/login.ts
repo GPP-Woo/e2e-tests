@@ -26,7 +26,9 @@ export async function openBeheer(page: Page) {
  * the model link straight away waits forever on a hidden element.
  */
 export async function openAdminSection(page: Page, group: string, model: string) {
-  await page.locator('#header').getByText(group, { exact: true }).click()
+  // The group toggle is a <span>; matching on text alone also hits the model
+  // link of the same name ("Publicaties" is both a group and a model).
+  await page.locator('#header span').filter({ hasText: new RegExp(`^${group}$`) }).first().click()
   await page.locator('#header').getByRole('link', { name: model, exact: true }).click()
 }
 

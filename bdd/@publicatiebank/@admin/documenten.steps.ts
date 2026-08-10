@@ -5,13 +5,10 @@ import { Given, Then, When } from '../../_core/fixture'
 /**
  * Testscript 8 (document beheer) steps. A published document is seeded through the
  * token API (`documents` fixture tracks it for admin cleanup); the beheer
- * mutations run through the Django admin via Stagehand `act()` behind the
- * `docAdmin` fixture, and assertions read the admin back through the ordinary
- * session-authenticated `page` (stable, unlike the token API while Stagehand
- * drives the same server — see README "Known server flake").
- *
- * The `@ai` skip guard (no OpenRouter key → skip) and the `adminStagehand`
- * fixture are shared with the organisatie/onderwerp/publicatie steps (see steps.ts).
+ * mutations run through the Django admin with plain Playwright locators behind
+ * the `docAdmin` fixture, and assertions read the admin back through the same
+ * session-authenticated `page` (stable, unlike the token API while an admin
+ * session mutates the same server — see README "Known server flake").
  */
 
 const READ = { timeout: 10_000, intervals: [400, 800, 1500] }
@@ -33,10 +30,8 @@ Given('a published document', async ({ organisations, publications, documents })
 // --- Withdraw (intrekken) ---------------------------------------------------
 
 When('I withdraw the document through the admin', async ({ page, docAdmin, documents }) => {
-  // Open the change page deterministically via the session `page` (same tab as
-  // Stagehand after CDP adoption) — the act() row-click did not reliably land on
-  // the *document* change page. The publicatiestatus is a native <select>; set it
-  // deterministically too (act() on status dropdowns was the flakiest step).
+  // The publicatiestatus is a native <select>, so set it directly; the driver
+  // only owns the shared changelist mechanics (open the row, save).
   await openDocumentAdmin(page, documents.last())
   await page.locator('#id_publicatiestatus').selectOption('ingetrokken')
   await docAdmin.save()
@@ -65,7 +60,7 @@ Then('the document no longer exists', async ({ page, documents }) => {
 // --- Search (UI read under test) -------------------------------------------
 
 When('I search the admin for the document', async () => {
-  // Drive the changelist search box via Stagehand: await docAdmin.search(documents.last()).
+  // Drive the changelist search box: await docAdmin.search(documents.last()).
   throw new Error('TODO: run docAdmin.search(documents.last()) on the document changelist')
 })
 
@@ -77,10 +72,10 @@ Then('the document is shown in the admin results', async () => {
 // --- Edit metadata ----------------------------------------------------------
 
 When('I edit the document metadata through the admin', async () => {
-  // openDocumentAdmin(page, documents.last()); Stagehand act() to replace officiële
-  // titel / verkorte titel / omschrijving with fresh values; docAdmin.save().
+  // openDocumentAdmin(page, documents.last()); fill #id_officiele_titel /
+  // #id_verkorte_titel / #id_omschrijving with fresh values; docAdmin.save().
   // Store the new officiële titel in scratch (documents.track it) for the assertion.
-  throw new Error('TODO: open the document change page, edit its metadata fields via docAdmin.act, save, and stash the new titel in scratch')
+  throw new Error('TODO: open the document change page, edit its metadata fields via the form fields, save, and stash the new titel in scratch')
 })
 
 Then('the document shows the edited metadata when reopened', async () => {
@@ -92,9 +87,9 @@ Then('the document shows the edited metadata when reopened', async () => {
 // --- Edit kenmerken ---------------------------------------------------------
 
 When('I edit the document kenmerken through the admin', async () => {
-  // openDocumentAdmin(page, documents.last()); use docAdmin.act to add/change/remove
-  // a kenmerk (bron + kenmerk inline rows); docAdmin.save(); stash the value in scratch.
-  throw new Error('TODO: open the document, add/change/remove a kenmerk via docAdmin.act, save, and stash the kenmerk in scratch')
+  // openDocumentAdmin(page, documents.last()); add/change/remove a kenmerk in the
+  // inline rows (bron + kenmerk); docAdmin.save(); stash the value in scratch.
+  throw new Error('TODO: open the document, add/change/remove a kenmerk in the inline rows, save, and stash the kenmerk in scratch')
 })
 
 Then('the document shows the edited kenmerken when reopened', async () => {
@@ -154,13 +149,13 @@ Then('the deletion is recorded in the audit log', async () => {
 
 When('I edit the document from within its publication through the admin', async () => {
   // Open the publications.last() change page, scroll to the document inline, edit its
-  // titel/omschrijving via docAdmin.act, save; stash the new titel in scratch for reuse
+  // titel/omschrijving on the inline form, save; stash the new titel in scratch for reuse
   // by "the document shows the edited metadata when reopened".
-  throw new Error('TODO: edit the document inline on the publicatie change page via docAdmin.act, save, and stash the new titel in scratch')
+  throw new Error('TODO: edit the document inline on the publicatie change page via the form fields, save, and stash the new titel in scratch')
 })
 
 When('I delete the document from within its publication through the admin', async () => {
   // Open the publications.last() change page, tick the document inline "Verwijderen"
-  // checkbox via docAdmin.act, and docAdmin.save().
+  // checkbox, and docAdmin.save().
   throw new Error('TODO: tick the document inline "Verwijderen" checkbox on the publicatie change page and save')
 })

@@ -25,16 +25,12 @@ import { Given, Then, When } from '../../_core/fixture'
  * Testscript 9 (publicatie beheer) steps — driven entirely through the ordinary
  * session-authenticated Playwright `page`.
  *
- * This feature deliberately does *not* use the Stagehand `pubAdmin` driver the
- * other @admin features use. Every mutation here is a Django admin form: a
- * change-form field, a native `<select>`, a select2 autocomplete, an inline
- * formset, a changelist bulk action. Those have stable ids, so natural-language
- * `act()` buys nothing — and it cost a great deal: across the validation runs
- * every single failure came from Stagehand and none from the admin (act() row
- * clicks leaving the DOM churning mid-interaction, silently no-op'ed field
- * edits, "Verwijderen" resolving to the eigenaar-inline link, and the
- * understudy locator's missing auto-wait). Reads were already deterministic;
- * now the writes are too.
+ * This feature deliberately does *not* use the `pubAdmin` driver the other
+ * @admin features use. That driver owns only the shared changelist script
+ * (search → open a row → save → delete-with-confirm); every mutation here is a
+ * bespoke Django admin form instead — a select2 autocomplete, an inline
+ * formset, a changelist bulk action — with stable ids of its own, so routing
+ * them through the driver would add a hop without removing a selector.
  *
  * Test data is still seeded and cleaned up over the admin by the `publications`
  * fixture — the token API is unusable here (see README "Known server flake").
@@ -54,7 +50,7 @@ async function openPublication(page: Page, titel: string): Promise<void> {
 }
 
 // Prerequisites (deterministic, not the action under test), seeded through the
-// admin add form — the token API is unusable while Stagehand drives the admin.
+// admin add form — the token API is unusable while a session drives the admin.
 Given('a concept publicatie', async ({ publications }) => {
   await publications.seed()
 })

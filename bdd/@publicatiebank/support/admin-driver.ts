@@ -1,93 +1,62 @@
-import type { StagehandPage } from '@/bdd/_core/stagehand'
-import type { Stagehand } from '@browserbasehq/stagehand'
-import { settle, stagehandPage } from '@/bdd/_core/stagehand'
+import type { Page } from '@playwright/test'
+import type { AdminResource } from './admin-resource'
 
 /**
- * A Django-admin resource driven from natural language via Stagehand `act()`.
+ * A Django-admin resource driven through the ordinary session-authenticated
+ * Playwright `page`.
  *
  * The organisatie/onderwerp/publicatie beheer scenarios all run the same
  * changelist CRUD script — open the changelist, search a row and open it, save
  * with "Opslaan", delete-with-confirm — differing only in the Dutch noun and the
- * changelist path. This binds that script to one `{ noun, changelist }` so the
- * step files express intent (`open`, `save`, `rename`, `remove`) instead of
- * re-typing the goto→act→networkidle mechanics. Assertions still read the admin
- * back through the ordinary session `page` (see {@link adminResource}); this
- * seam only owns the *mutations*.
+ * entity's {@link AdminResource}. This binds that script to one config so the
+ * step files express intent (`open`, `save`, `remove`) instead of re-typing the
+ * goto→click→assert mechanics. The changelist selectors themselves live once in
+ * `admin-resource.ts`, which the read/cleanup helpers share.
  */
 export interface AdminDriverConfig {
-  /** Dutch singular used in the act() phrasing, e.g. `organisatie`, `onderwerp`, `publicatie`. */
+  /** Dutch singular used in error messages, e.g. `organisatie`, `onderwerp`, `publicatie`. */
   noun: string
-  /** Absolute changelist URL (no trailing `?q=`), e.g. `${pub}/admin/metadata/organisation/`. */
-  changelist: string
-  /** Absolute add-form URL. Optional — only needed by flows that add through the admin. */
-  add?: string
-  /** How the row link reads in the act() phrasing. Defaults to `link`; publicaties use `titel link`. */
-  rowLink?: string
+  /** The entity's shared changelist mechanics (search, open, delete-with-confirm). */
+  resource: AdminResource
 }
 
 export interface AdminDriver {
-  /** The understudy page Stagehand drives (for file carve-outs / navigation). */
-  readonly page: StagehandPage
-  /** Pass an instruction straight to Stagehand `act()`. */
-  act: (instruction: string) => Promise<unknown>
-  /** Wait for the network to settle (best-effort). */
-  settle: () => Promise<void>
-  /** Open the changelist and settle. */
+  /** Open the changelist. */
   openList: () => Promise<void>
-  /** Open the add form and settle. */
-  openAdd: () => Promise<void>
-  /** Search for `name` and open its row in the changelist. */
+  /** Search for `name` and open its row in the changelist; throws if there is none. */
   open: (name: string) => Promise<void>
-  /** Click "Opslaan" and settle. */
+  /** Click "Opslaan" and assert the admin redirected back to the changelist. */
   save: () => Promise<void>
-  /** Delete-with-confirm the currently open change page, and settle. */
+  /** Delete-with-confirm the currently open change page. */
   removeCurrent: () => Promise<void>
-  /** Search the changelist for `name` via the admin search box, and settle. */
+  /** Search the changelist for `name` through the admin search box. */
   search: (name: string) => Promise<void>
 }
 
-export function adminDriver(stagehand: Stagehand, config: AdminDriverConfig): AdminDriver {
-  const { noun, changelist, add, rowLink = 'link' } = config
-  const page = stagehandPage(stagehand)
-  const act = (instruction: string) => stagehand.act(instruction)
-  const settleHere = () => settle(page)
-
+export function adminDriver(page: Page, { noun, resource }: AdminDriverConfig): AdminDriver {
   return {
-    page,
-    act,
-    settle: settleHere,
     async openList() {
-      await page.goto(changelist)
-      await settleHere()
-    },
-    async openAdd() {
-      if (!add)
-        throw new Error(`adminDriver for "${noun}" has no add URL configured`)
-      await page.goto(add)
-      await settleHere()
+      await page.goto(resource.changelistUrl())
     },
     async open(name) {
-      await page.goto(`${changelist}?q=${encodeURIComponent(name)}`)
-      await act(`Open the ${noun} by clicking its ${rowLink} in the results table`)
-      // Settle the change page before returning — callers interact with its form
-      // fields deterministically (e.g. #id_publicatiestatus) via the Stagehand
-      // understudy locator, which has no auto-wait; without this it can query
-      // before the change page renders (StagehandElementNotFoundError).
-      await settleHere()
+      if (!(await resource.open(page, name)))
+        throw new Error(`No ${noun} named "${name}" in the admin changelist`)
     },
     async save() {
-      await act(`Click the "Opslaan" button to save the ${noun}`)
-      await settleHere()
+      await page.locator('input[name="_save"]').click()
+      await resource.assertOnChangelist(page)
     },
     async removeCurrent() {
-      await act(`Click the "Verwijderen" button to delete this ${noun}`)
-      await act('Confirm the deletion by clicking the "Ja, ik weet het zeker" button')
-      await settleHere()
+      await resource.deleteOpen(page)
     },
     async search(name) {
-      await page.goto(changelist)
-      await act(`Type "${name}" in the search box and submit the search`)
-      await settleHere()
+      // Django's built-in changelist search box — a stable id on every admin
+      // changelist, regardless of theme. Driven as a user would (rather than a
+      // `?q=` goto) because the search box itself is the read under test.
+      await page.goto(resource.changelistUrl())
+      await page.locator('#searchbar').fill(name)
+      await page.locator('#searchbar').press('Enter')
+      await resource.assertOnChangelist(page)
     },
   }
 }

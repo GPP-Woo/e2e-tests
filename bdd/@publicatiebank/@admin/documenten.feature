@@ -3,10 +3,9 @@
 # A published document — seeded through the woo-publications token API (see
 # support/document.ts; the Documenten API must be provisioned first via
 # setup/provision-documenten-api.sh) — is withdrawn / deleted through the Django
-# admin via Stagehand act() behind the `docAdmin` fixture (a ready-built
-# AdminDriver bound to `adminStagehand`). Assertions read the admin back through
-# the ordinary session-authenticated `page` (stable), exactly like the publicatie
-# beheer (TS9).
+# admin behind the `docAdmin` fixture (a ready-built AdminDriver over the session
+# `page`). Assertions read the admin back through that same page, exactly like
+# the publicatie beheer (TS9).
 #
 # SETUP PREREQUISITE: run `setup/provision-documenten-api.sh` once per fresh stack.
 # It wires the Documenten API (so `POST /documenten` registers in OpenZaak) AND
@@ -15,11 +14,10 @@
 # ('NoneType' has no attribute 'is_authenticated'). A `docker compose down`/`up`
 # resets the container to the unpatched image, so re-run the script after it.
 #
-# The change page is opened deterministically (changelist search → row click via
-# the session `page`, see openDocumentAdmin) — the Stagehand act() row-click did
-# not reliably land on the *document* change page. Stagehand still drives the
-# save / delete mutations.
-@ai @mode:serial @timeout:120000
+#
+# @chromium-only — these scenarios mutate a document shared with the publicatie
+# beheer feature on the same stack; only one browser project may drive them.
+@chromium-only @mode:serial @timeout:120000
 Feature: Document beheer in de GPP-publicatiebank
 
   Scenario: Withdraw a document

@@ -2,34 +2,29 @@
 #
 # A functioneel-beheerder configures the public GPP-burgerportaal through its
 # beheer interface (welkomsttekst, video, afbeeldingen, externe links) and a
-# burger sees the result on the public site. Here an AI agent (Stagehand driven
-# by an OpenRouter model) operates the beheer UI, while assertions are made
-# deterministically against the public site: the config API
-# (/api/environment/resources), the rendered DOM, and raw image bytes.
+# burger sees the result on the public site. The beheer UI is operated through
+# plain Playwright locators on its Dutch labels, and assertions are made against
+# the public site: the config API (/api/environment/resources), the rendered DOM,
+# and raw image bytes.
 #
 # Test-owned data: the beheer config is snapshotted before each scenario and
 # restored afterwards (bdd/_core/fixture.ts `beheer` fixture), so runs — including
 # against shared/production environments — leave the portal exactly as found.
 #
-# Model routing: this feature runs on the cheap default (Gemini Flash). If DOM
-# acts prove flaky, add @expensive-ai (Claude Sonnet) or pin a specific model
-# with a @model:<openrouter-id> tag (e.g. @model:openai/gpt-4.1). See
-# _core/stagehand.ts and the README "AI model routing" table.
-#
-# @ai — marks this as a Stagehand scenario: shares the @ai guard (skips without
-# OPENROUTER_API_KEY, and chromium-only since Stagehand attaches to Chromium's
-# CDP port). See _core/stagehand.ts and the README "AI model routing" table.
+# @chromium-only — the burgerportaal configuration these scenarios mutate is a
+# single global resource, so only one browser project may touch it; the parallel
+# firefox/webkit runs would otherwise clobber each other's snapshot/restore.
 #
 # @mode:serial — the burgerportaal configuration is a single global resource, so
 # these scenarios must not run concurrently (a parallel snapshot/restore would
 # race). They run sequentially in one worker; the rest of the suite still runs
 # in parallel.
 #
-# @timeout:120000 — each scenario drives the beheer UI through Stagehand (LLM
-# round-trips per act) and then publishes, which comfortably exceeds Playwright's
-# 30s default; the other Stagehand features carry the same override.
+# @timeout:120000 — each scenario walks the beheer UI, publishes, and then polls
+# the public config until it catches up, which can exceed Playwright's 30s
+# default on a loaded stack.
 
-@ai @mode:serial @timeout:120000
+@chromium-only @mode:serial @timeout:120000
 Feature: Configureren van het burgerportaal
 
   Background:

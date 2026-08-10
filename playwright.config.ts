@@ -39,14 +39,11 @@ export default defineConfig({
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  /* Retries. The Stagehand @ai scenarios are inherently non-deterministic — an
-     act() occasionally misfires (rotating across scenarios run-to-run), and the
-     SPA/admin teardown can time out on a slow firefox/webkit under emulated-
-     backend load. A single retry absorbs these transient flakes without masking a
-     real, reproducible failure (which fails twice). @expensive-ai on the repeat
-     offenders lowers the first-attempt miss rate so the retry is rarely needed.
-     One retry everywhere: the @ai scenarios carry @timeout:120000/@timeout:240000,
-     so a second CI retry costs up to 4 extra minutes *per broken scenario* — that
+  /* Retries. The SPA/admin teardown can time out on a slow firefox/webkit under
+     emulated-backend load. A single retry absorbs that transient flake without
+     masking a real, reproducible failure (which fails twice). One retry only:
+     the @chromium-only scenarios carry @timeout:120000/@timeout:240000, so a
+     second CI retry costs up to 4 extra minutes *per broken scenario* — that
      alone pushed the k8s run past its job timeout without catching anything a
      single retry doesn't. */
   retries: 1,
@@ -85,10 +82,11 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        /* Expose CDP so the Stagehand @ai/@beheer scenarios can attach to THIS
-           browser (see bdd/_core/stagehand.ts cdpEndpointForWorker — the port
-           must match: 9330 + the worker's parallel index) and share one traced
-           page. Keep the Keycloak host-resolver arg from the shared `use`. */
+        /* Expose CDP so an @ai (Stagehand) scenario can attach to THIS browser
+           (see bdd/_core/stagehand.ts cdpEndpointForWorker — the port must
+           match: 9330 + the worker's parallel index) and share one traced page.
+           Unused until a scenario is tagged @ai, but the port must already be
+           open when one is. Keep the Keycloak host-resolver arg from `use`. */
         launchOptions: {
           args: [
             '--host-resolver-rules=MAP keycloak.woo-search.local 127.0.0.1',
@@ -101,18 +99,18 @@ export default defineConfig({
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
-      /* @ai (Stagehand) scenarios drive Chromium over CDP, which firefox/webkit
-         don't expose — so they can only run in the chromium project. Excluding
-         them here (not just via a runtime Before-skip) also stops the shared
-         global resources they mutate (e.g. the burgerportaal config) from being
-         clobbered by a parallel browser. */
-      grepInvert: /@ai/,
+      /* @chromium-only scenarios mutate shared global resources (e.g. the
+         burgerportaal config, seeded publicaties). Excluding them here — not just
+         via the runtime Before-skip — stops a parallel browser from clobbering a
+         snapshot/restore mid-flight. @ai is excluded for the same reason plus a
+         hard one: Stagehand attaches over CDP, which only Chromium exposes. */
+      grepInvert: /@chromium-only|@ai/,
       dependencies: ['setup'],
     },
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
-      grepInvert: /@ai/,
+      grepInvert: /@chromium-only|@ai/,
       dependencies: ['setup'],
     },
   ],

@@ -12,6 +12,13 @@ import { DEFAULT_USER, ENV } from './types'
  * and scenario scratch space. App-owned fixtures (resource managers, admin
  * drivers, the beheer config client) live in each app's `fixtures.ts`; the
  * chain is composed in `_core/fixture.ts`.
+ *
+ * The `stagehand` / `adminStagehand` fixtures are currently unused: every step
+ * that once drove the UI from natural language now uses plain Playwright
+ * locators. They are kept wired up (together with `_core/stagehand.ts` and its
+ * model routing) so a future scenario that genuinely needs AI can take the
+ * fixture and go — nothing else to reassemble. A fixture is only built when a
+ * step destructures it, so an unused one costs nothing at runtime.
  */
 
 /** Mutable holder so hooks and steps can agree on who logs in. */
@@ -38,14 +45,16 @@ export interface CoreFixtures {
    * AI (Stagehand + OpenRouter) for the @beheer scenarios. Attaches over CDP to
    * the Playwright-traced `page` context (which carries the beheer-admin
    * session) and drives it from natural language; the model is chosen from the
-   * scenario tags. Closed automatically in teardown.
+   * scenario tags. Closed automatically in teardown. Unused today — see the
+   * module comment.
    */
   stagehand: Stagehand
   /**
-   * AI (Stagehand + OpenRouter) for the @ai/@admin scenarios that mutate the
+   * AI (Stagehand + OpenRouter) for the @admin scenarios that mutate the
    * publicatiebank/gpp-app UI from natural language. Attaches over CDP to the
    * Playwright-traced `page` context (which carries the admin session). Model
-   * chosen from the scenario tags; closed in teardown.
+   * chosen from the scenario tags; closed in teardown. Unused today — see the
+   * module comment.
    */
   adminStagehand: Stagehand
   /** Generic scenario-scoped key/value scratch shared between a step and its assertion. */
@@ -57,8 +66,8 @@ export interface CoreFixtures {
 export const coreTest = base.extend<CoreFixtures>({
   /**
    * Auth-by-tag: reuse a pre-authenticated session based on the scenario tags.
-   * The tag → session table (and why the Stagehand scenarios need the session
-   * they get) lives in `_core/roles.ts`.
+   * The tag → session table (and why each scenario needs the session it gets)
+   * lives in `_core/roles.ts`.
    */
   storageState: async ({ $tags }, use) => {
     await use(stateForTags($tags))

@@ -2,7 +2,8 @@ import type { Page } from '@playwright/test'
 import path from 'node:path'
 import { adminResource } from './admin-resource'
 
-const resource = adminResource({
+/** Shared Django-admin changelist mechanics for this entity (also drives its `adminDriver`). */
+export const resource = adminResource({
   path: 'publications/topic',
   nameCell: 'th.field-officiele_titel a',
   changeId: '[0-9a-f-]+',
@@ -48,8 +49,8 @@ export function listE2ETopicNames(page: Page, prefix = 'E2E ') {
 
 /**
  * Whether an onderwerp with exactly this titel exists, read from the admin
- * changelist. Deterministic verification for the Stagehand-driven scenarios (the
- * token API is unreliable while Stagehand drives the same admin — see README).
+ * changelist. Deterministic verification for the admin-driven scenarios (the token API is
+ * unreliable while an admin session mutates the same server — see README).
  */
 export function topicExists(page: Page, titel: string): Promise<boolean> {
   return resource.exists(page, titel)
