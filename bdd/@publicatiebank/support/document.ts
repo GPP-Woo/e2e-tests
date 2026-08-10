@@ -128,6 +128,8 @@ export async function seedDocument(opts: {
   omschrijving?: string
   verantwoordelijkeUuid?: string
   informatieCategorieUuids?: string[]
+  /** Topic UUIDs to couple on the publicatie (burgerportaal onderwerp → publicaties). */
+  onderwerpen?: string[]
 }): Promise<{ publicatie: any, document: any }> {
   const ctx = await apiRequest.newContext()
   try {
@@ -140,6 +142,7 @@ export async function seedDocument(opts: {
       publisher: orgUuid,
       verantwoordelijke: opts.verantwoordelijkeUuid ?? orgUuid,
       informatieCategorieen: catUuids,
+      onderwerpen: opts.onderwerpen ?? [],
       publicatiestatus: opts.publicatieStatus ?? 'gepubliceerd',
     })
     const content = Buffer.from(`E2E document body for ${opts.documentTitel}\n`)
@@ -175,6 +178,92 @@ export async function seedDocument(opts: {
         throw new Error(`PUT bestandsdeel -> ${up.status()}: ${(await up.text()).slice(0, 200)}`)
     }
     return { publicatie: pub, document: doc }
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
+/**
+ * PATCH a document or publicatie `publicatiestatus` via the token API.
+ *
+ * ODRC ignores `publicatiestatus: 'ingetrokken'` on create (file upload still
+ * yields `gepubliceerd`), and refuses creating a publicatie directly as
+ * `ingetrokken`. Sitemap exclusion scenarios must therefore publish first, then
+ * withdraw with this helper.
+ */
+export async function patchPublicatiestatus(
+  kind: 'documenten' | 'publicaties',
+  uuid: string,
+  publicatiestatus: 'concept' | 'gepubliceerd' | 'ingetrokken',
+): Promise<any> {
+  const ctx = await apiRequest.newContext()
+  try {
+    const res = await ctx.patch(new URL(`${kind}/${uuid}`, API_BASE).href, {
+      headers: tokenHeaders({ 'Content-Type': 'application/json' }),
+      data: { publicatiestatus },
+    })
+    const body = await res.text()
+    if (res.status() >= 400)
+      throw new Error(`PATCH ${kind}/${uuid} -> ${res.status()}: ${body.slice(0, 400)}`)
+    return JSON.parse(body)
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
+/** PATCH document metadata fields via the token API (omschrijving, verkorteTitel, …). */
+export async function patchDocument(
+  uuid: string,
+  data: Record<string, unknown>,
+): Promise<any> {
+  const ctx = await apiRequest.newContext()
+  try {
+    const res = await ctx.patch(new URL(`documenten/${uuid}`, API_BASE).href, {
+      headers: tokenHeaders({ 'Content-Type': 'application/json' }),
+      data,
+    })
+    const body = await res.text()
+    if (res.status() >= 400)
+      throw new Error(`PATCH documenten/${uuid} -> ${res.status()}: ${body.slice(0, 400)}`)
+    return JSON.parse(body)
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
+/** DELETE a document via the token API. */
+export async function deleteDocumentViaToken(uuid: string): Promise<void> {
+  const ctx = await apiRequest.newContext()
+  try {
+    const res = await ctx.delete(new URL(`documenten/${uuid}`, API_BASE).href, {
+      headers: tokenHeaders(),
+    })
+    if (res.status() >= 400 && res.status() !== 404)
+      throw new Error(`DELETE documenten/${uuid} -> ${res.status()}: ${(await res.text()).slice(0, 400)}`)
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
+/** Resolve an informatiecategorie uuid by exact naam (token API). */
+export async function informatieCategorieUuidByNaam(naam: string): Promise<string> {
+  const ctx = await apiRequest.newContext()
+  try {
+    let next: string | null = 'informatiecategorieen?pageSize=100'
+    while (next) {
+      const page = await getJson(ctx, next)
+      const hit = (page.results ?? []).find((c: { naam?: string }) => c.naam === naam)
+      if (hit?.uuid)
+        return hit.uuid as string
+      next = page.next
+        ? String(page.next).replace(/^https?:\/\/[^/]+\/api\/v2\//, '')
+        : null
+    }
+    throw new Error(`Informatiecategorie "${naam}" not found in ODRC`)
   }
   finally {
     await ctx.dispose()

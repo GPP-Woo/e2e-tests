@@ -17,15 +17,29 @@ function tag(name: string) {
   return String.raw`(?:\w+:)?${name}`
 }
 
+/** Open tag: name must end at whitespace, `/`, or `>` so `omschrijving` ≠ `omschrijvingen`. */
+function openTag(name: string) {
+  return String.raw`<${tag(name)}(?=[\s/>])[^>]*>`
+}
+
+function closeTag(name: string) {
+  return String.raw`</${tag(name)}>`
+}
+
+/** Self-closing or opening tag presence. */
+function tagStart(name: string) {
+  return String.raw`<${tag(name)}(?=[\s/>])`
+}
+
 /** All text contents of `<name>...</name>` occurrences (namespace-tolerant). */
 export function elementTexts(xml: string, name: string): string[] {
-  const re = new RegExp(`<${tag(name)}[^>]*>([\\s\\S]*?)</${tag(name)}>`, 'g')
+  const re = new RegExp(`${openTag(name)}([\\s\\S]*?)${closeTag(name)}`, 'g')
   return Array.from(xml.matchAll(re), m => m[1].trim())
 }
 
 /** True when at least one `<name>` element (self-closing or not) is present. */
 export function hasElement(xml: string, name: string): boolean {
-  return new RegExp(`<${tag(name)}(?:[\\s/>])`).test(xml)
+  return new RegExp(tagStart(name)).test(xml)
 }
 
 /** The `<loc>` values listed in a sitemap index. */
@@ -35,7 +49,7 @@ export function sitemapLocations(indexXml: string): string[] {
 
 /** Each `<url>...</url>` block of a sitemap, as raw XML fragments. */
 export function urlEntries(sitemapXml: string): string[] {
-  const re = new RegExp(`<${tag('url')}[^>]*>[\\s\\S]*?</${tag('url')}>`, 'g')
+  const re = new RegExp(`${openTag('url')}[\\s\\S]*?${closeTag('url')}`, 'g')
   return sitemapXml.match(re) ?? []
 }
 
@@ -68,12 +82,15 @@ export function elementText(xml: string, name: string): string | undefined {
  * element text (the human label); falls back to the `resource` attribute.
  */
 export function resourceValues(xml: string, name: string): string[] {
-  const re = new RegExp(`<${tag(name)}([^>]*)>([\\s\\S]*?)</${tag(name)}>|<${tag(name)}([^>]*)/>`, 'g')
+  const re = new RegExp(
+    `${openTag(name)}([\\s\\S]*?)${closeTag(name)}|${tagStart(name)}([^>]*)/>`,
+    'g',
+  )
   return Array.from(xml.matchAll(re), (m) => {
-    const attrs = m[1] ?? m[3] ?? ''
-    const text = (m[2] ?? '').trim()
+    const text = (m[1] ?? '').trim()
     if (text)
       return text
+    const attrs = m[2] ?? ''
     return attrs.match(/\bresource\s*=\s*"([^"]+)"/i)?.[1] ?? ''
   }).filter(Boolean)
 }

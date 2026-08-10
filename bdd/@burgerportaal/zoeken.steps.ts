@@ -4,8 +4,12 @@ import { Before, Given, test, Then, When } from '../_core/fixture'
 import {
   burgerportaalBase as burg,
   openSearchResultsPage,
+  postZoeken,
+  seedIndexedPublicationDocument,
   submitHomepageSearch,
+  topicUuidByTitel,
   waitForSearchField,
+  waitForZoekenHit,
 } from './support/search'
 
 // Neither SPA (burgerportaal, gpp-app) finishes booting in WebKit on this stack:
@@ -27,12 +31,20 @@ Before({ tags: '@no-webkit' }, async ({ browserName }) => {
  * mutations happen here, so there is nothing for Stagehand to do.
  *
  * Onderwerpen are seeded through the publicatiebank admin (the `topics` fixture)
- * and are served live on the burgerportaal, so a freshly published onderwerp is
- * browsable within seconds. See the feature file for why search-hit indexing and
- * the homepage counters are not asserted.
+ * and are served live on the burgerportaal. Search hits are seeded via the token
+ * API (`seedDocument` + landelijke publisher) and polled on POST /api/zoeken
+ * until Elasticsearch surfaces them.
  */
 
 const LIVE = { timeout: 30_000, intervals: [1000, 2000, 3000] }
+const INDEX = { timeout: 60_000, intervals: [1000, 2000, 3000] }
+
+function requireScratch(scratch: Map<string, string>, key: string): string {
+  const v = scratch.get(key)
+  if (!v)
+    throw new Error(`Missing scratch ${key} — seed Given/When did not run?`)
+  return v
+}
 
 Given('the burgerportaal homepage is open', async ({ page }) => {
   await page.goto(burg)
@@ -45,6 +57,27 @@ Given('a promoted, published onderwerp', async ({ topics, scratch }) => {
   const omschrijving = `E2E burger omschrijving ${Date.now()}`
   scratch.set('onderwerp:omschrijving', omschrijving)
   await topics.add(undefined, { status: 'gepubliceerd', promoot: true, omschrijving })
+})
+
+Given('a promoted, published onderwerp with a coupled publicatie', async ({
+  topics,
+  publications,
+  documents,
+  scratch,
+}) => {
+  const omschrijving = `E2E burger omschrijving ${Date.now()}`
+  scratch.set('onderwerp:omschrijving', omschrijving)
+  await topics.add(undefined, { status: 'gepubliceerd', promoot: true, omschrijving })
+  const topicTitel = topics.last()
+  const topicUuid = await topicUuidByTitel(topicTitel)
+  scratch.set('onderwerp:uuid', topicUuid)
+  const { token, publicatie } = await seedIndexedPublicationDocument({
+    publications,
+    documents,
+    scratch,
+    onderwerpen: [topicUuid],
+  })
+  await waitForZoekenHit(token, hit => hit.type === 'publication' && hit.record.uuid === publicatie.uuid)
 })
 
 // Enough gepromote onderwerpen for carousel nav/pause controls to appear
@@ -60,6 +93,52 @@ Given('several promoted, published onderwerpen', async ({ topics, scratch }) => 
     })
   }
   scratch.set('onderwerp:omschrijving', lastOmschrijving)
+})
+
+Given('an indexed publicatie with a document', async ({ publications, documents, scratch }) => {
+  const { token, publicatie, document } = await seedIndexedPublicationDocument({
+    publications,
+    documents,
+    scratch,
+  })
+  // Wait for BOTH hit types — publication indexes first; document scenarios
+  // filter to resultTypes=document and fail if we only waited on the pub.
+  await waitForZoekenHit(
+    token,
+    hit => hit.type === 'publication' && hit.record.uuid === publicatie.uuid,
+  )
+  await waitForZoekenHit(
+    token,
+    hit => hit.type === 'document' && hit.record.uuid === document.uuid,
+  )
+})
+
+Given('enough indexed search hits for pagination', async ({ publications, documents, scratch }) => {
+  // Page size is 10; each seed yields a publication + document hit under one token.
+  const token = `E2EPaginate${Date.now()}`
+  scratch.set('zoeken:token', token)
+  for (let i = 0; i < 6; i++) {
+    await seedIndexedPublicationDocument({
+      publications,
+      documents,
+      scratch,
+      token,
+      publicatieTitel: `${publications.freshName()} ${token} ${i}`,
+      documentTitel: `${documents.freshName()} ${token} ${i}`,
+    })
+  }
+  await expect.poll(async () => (await postZoeken({ query: token })).count, INDEX)
+    .toBeGreaterThan(10)
+})
+
+Given('the burgerportaal search results page is open for the seeded content', async ({ page, scratch }) => {
+  const token = requireScratch(scratch, 'zoeken:token')
+  await openSearchResultsPage(page, token)
+  await expect.poll(async () => {
+    const text = await page.locator('body').textContent()
+    return text ?? ''
+  }, INDEX).toMatch(/resultaten gevonden|Geen resultaten/)
+  await expect(page.getByText(/\d+ resultaten gevonden/)).toBeVisible({ timeout: 20_000 })
 })
 
 // --- Full-text search (experience, not seeded-content indexing) -------------
@@ -111,6 +190,21 @@ Then('its omschrijving is shown', async ({ page, scratch }) => {
 
 // --- Homepage (manual step 1) ----------------------------------------------
 
+Then('the homepage shows counts of onderwerpen, publicaties and documenten', async ({ page }) => {
+  // Info block at the bottom of the homepage (Cijfers.vue): dt/dd pairs with
+  // numeric count links. Zero is a valid count when ES has no indexed content yet.
+  // Prefer filter({ hasText }) over getByRole name — dt "term" has no accessible name.
+  await expect(page.getByRole('heading', { name: 'Cijfers over deze website' })).toBeVisible({
+    timeout: 20_000,
+  })
+  for (const label of ['Publicaties', 'Documenten', 'Onderwerpen'] as const) {
+    const term = page.getByRole('term').filter({ hasText: label })
+    await expect(term).toBeVisible()
+    const countLink = term.locator('..').getByRole('link', { name: /^\d+$/ })
+    await expect(countLink).toBeVisible()
+  }
+})
+
 Then('the homepage shows the configured branding', async ({ page, beheer }) => {
   const resources = await beheer.getResources()
   // Logo (SVG inlined into .gpp-woo-logo, or <img>).
@@ -144,6 +238,41 @@ When('I search the burgerportaal by clicking the Zoeken button', async ({ page }
   await submitHomepageSearch(page, 'woo', { via: 'button' })
 })
 
+// Document-body search remains @blocked (see feature); stubs stay for bddgen.
+When('I search the burgerportaal for a term in a document\'s contents', async () => {
+  throw new Error('BLOCKED: document body text not ingested without download_url')
+})
+
+Then('the matching publicatie appears in the search results', async () => {
+  throw new Error('BLOCKED: document body text not ingested without download_url')
+})
+
+When('I search the burgerportaal for a term in an onderwerp\'s titel', async ({
+  page,
+  topics,
+  scratch,
+}) => {
+  const token = `E2EZoekTopic${Date.now()}`
+  const omschrijving = `E2E zoek omschrijving ${token}`
+  scratch.set('onderwerp:omschrijving', omschrijving)
+  scratch.set('zoeken:token', token)
+  await topics.add(`E2E Zoek ${token}`, {
+    status: 'gepubliceerd',
+    promoot: true,
+    omschrijving,
+  })
+  scratch.set('zoeken:topicTitel', topics.last())
+  await waitForZoekenHit(token, hit => hit.type === 'topic' && hit.record.officieleTitel.includes(token))
+  await submitHomepageSearch(page, token, { via: 'enter' })
+})
+
+Then('the matching onderwerp appears in the search results', async ({ page, scratch }) => {
+  const titel = requireScratch(scratch, 'zoeken:topicTitel')
+  await expect(page.getByRole('link', { name: titel })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('article').filter({ hasText: titel }).getByText('Onderwerp', { exact: true }))
+    .toBeVisible()
+})
+
 // --- Navigating the search results (manual step 3) -------------------------
 
 Given('the burgerportaal search results page is open', async ({ page }) => {
@@ -168,6 +297,173 @@ Then('the results page reflects the edited query', async ({ page, scratch }) => 
   const edited = scratch.get('search:editedQuery')!
   await expect(page.getByRole('searchbox', { name: 'Zoekterm' })).toHaveValue(edited)
   expect(decodeURIComponent(page.url())).toContain(edited)
+})
+
+When('I sort the search results chronologically', async ({ page, scratch }) => {
+  const token = requireScratch(scratch, 'zoeken:token')
+  await page.getByLabel('Sorteren').selectOption({ label: 'Chronologisch' })
+  await expect(page).toHaveURL(/sort=chronological/)
+  // Hold expected API order for the Then.
+  const api = await postZoeken({ query: token, sort: 'chronological', pageSize: 10 })
+  scratch.set('zoeken:chronoTitles', JSON.stringify(api.results.map(r => r.record.officieleTitel)))
+})
+
+Then('the search results are ordered by date', async ({ page, scratch }) => {
+  const expected = JSON.parse(requireScratch(scratch, 'zoeken:chronoTitles')) as string[]
+  await expect(page.getByLabel('Sorteren')).toHaveValue('chronological')
+  const list = page.locator('ol.gpp-woo-search-result-list, ol').filter({
+    has: page.getByRole('article'),
+  }).first()
+  await expect(list.getByRole('article').first()).toBeVisible({ timeout: 20_000 })
+  const titles = await list.getByRole('heading', { level: 3 }).locator('a').allTextContents()
+  expect(titles.slice(0, expected.length)).toEqual(expected)
+})
+
+When('I filter the search results by type', async ({ page }) => {
+  const checkbox = page.getByRole('checkbox', { name: /^Document/ })
+  await expect(checkbox).toBeVisible({ timeout: 20_000 })
+  await checkbox.check()
+  await expect(page).toHaveURL(/resultTypes=document/)
+})
+
+Then('only search results matching the filter remain', async ({ page, scratch }) => {
+  const token = requireScratch(scratch, 'zoeken:token')
+  await expect(page.getByText(/\d+ resultaten gevonden/)).toBeVisible({ timeout: 20_000 })
+  const articles = page.getByRole('article')
+  await expect(articles.first()).toBeVisible()
+  const count = await articles.count()
+  expect(count).toBeGreaterThan(0)
+  for (let i = 0; i < count; i++)
+    await expect(articles.nth(i).getByText('Document', { exact: true })).toBeVisible()
+  // Seeded document must still be among the filtered hits.
+  await expect(page.getByRole('link', { name: requireScratch(scratch, 'zoeken:docTitel') })).toBeVisible()
+  const api = await postZoeken({ query: token, resultTypes: ['document'] })
+  expect(api.results.every(r => r.type === 'document')).toBe(true)
+})
+
+When('I activate a search result filter', async ({ page }) => {
+  await expect(page.getByRole('group', { name: 'Organisaties' }).getByRole('checkbox').first())
+    .toBeVisible({ timeout: 20_000 })
+  await page.getByRole('checkbox', { name: /^Document/ }).check()
+  await expect(page).toHaveURL(/resultTypes=document/)
+})
+
+Then('the remaining search filters only offer options that yield results', async ({ page }) => {
+  const assertPositiveCounts = async (groupName: string) => {
+    const group = page.getByRole('group', { name: groupName })
+    const checkboxes = group.getByRole('checkbox')
+    await expect(checkboxes.first()).toBeVisible({ timeout: 20_000 })
+    const n = await checkboxes.count()
+    expect(n).toBeGreaterThan(0)
+    for (let i = 0; i < n; i++) {
+      const accessible = await checkboxes.nth(i).evaluate(el =>
+        (el.closest('label')?.textContent ?? el.getAttribute('aria-label') ?? '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      )
+      const m = accessible.match(/\((\d+)\)\s*$/)
+      expect(m, `${groupName} facet "${accessible}" should include a positive count`).toBeTruthy()
+      expect(Number(m![1])).toBeGreaterThan(0)
+    }
+  }
+  await assertPositiveCounts('Organisaties')
+  if (await page.getByRole('group', { name: 'Informatiecategorieën' }).getByRole('checkbox').count())
+    await assertPositiveCounts('Informatiecategorieën')
+})
+
+Then('the search results are paginated at ten per page', async ({ page, scratch }) => {
+  const token = requireScratch(scratch, 'zoeken:token')
+  await expect(page.getByText(/\d+ resultaten gevonden/)).toBeVisible({ timeout: 20_000 })
+  const summary = await page.getByText(/\d+ resultaten gevonden/).textContent()
+  const total = Number(summary?.match(/(\d+)/)?.[1] ?? 0)
+  expect(total).toBeGreaterThan(10)
+  const articles = page.getByRole('article')
+  await expect(articles.first()).toBeVisible()
+  expect(await articles.count()).toBeLessThanOrEqual(10)
+  await expect(page.getByRole('link', { name: /Volgende/ })).toBeVisible()
+  // API agrees page 1 is capped at 10 while count > 10.
+  const api = await postZoeken({ query: token, page: 1, pageSize: 10 })
+  expect(api.count).toBeGreaterThan(10)
+  expect(api.results.length).toBeLessThanOrEqual(10)
+  expect(api.next).toBe(true)
+})
+
+When('I open a search result', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  const link = page.getByRole('link', { name: pubTitel })
+  await expect(link).toBeVisible({ timeout: 20_000 })
+  await link.click()
+  await page.waitForURL(/\/publicaties\//, { timeout: 15_000 })
+})
+
+Then('the opened result shows its metadata', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  await expect(page.getByRole('heading', { name: pubTitel, level: 1 })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('rowheader', { name: 'Officiële titel' })).toBeVisible()
+  await expect(page.getByRole('rowheader', { name: 'Gepubliceerd op' })).toBeVisible()
+  await expect(page.getByRole('rowheader', { name: 'Laatst gewijzigd op' })).toBeVisible()
+})
+
+When('I open a document search result', async ({ page, scratch }) => {
+  const docTitel = requireScratch(scratch, 'zoeken:docTitel')
+  const docFilter = page.getByRole('checkbox', { name: /^Document/ })
+  await expect(docFilter).toBeVisible({ timeout: 20_000 })
+  if (!(await docFilter.isChecked()))
+    await docFilter.check()
+  await expect(page).toHaveURL(/resultTypes=document/)
+  const link = page.getByRole('article').filter({ hasText: docTitel }).getByRole('link').first()
+  await expect(link).toBeVisible({ timeout: 30_000 })
+  await link.click()
+  await page.waitForURL(/\/documenten\//, { timeout: 15_000 })
+})
+
+Then('the document result offers a download button', async ({ page, scratch }) => {
+  const docTitel = requireScratch(scratch, 'zoeken:docTitel')
+  await expect(page.getByRole('heading', { name: docTitel, level: 1 })).toBeVisible({ timeout: 30_000 })
+  // Button or link — label may be "Download" or include the filename.
+  const download = page.getByRole('link', { name: /Download/i }).or(page.getByRole('button', { name: /Download/i }))
+  await expect(download.first()).toBeVisible({ timeout: 20_000 })
+  const href = await download.first().getAttribute('href')
+  expect(href ?? '').toMatch(/\/api\/v2\/documenten\/.+\/download|\/documenten\/.+\/download/)
+})
+
+Then('I can navigate from the document to its publicatie', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  await expect(page.getByRole('heading', { name: 'Gekoppelde publicatie', level: 2 })).toBeVisible({
+    timeout: 20_000,
+  })
+  await page.getByRole('link', { name: pubTitel }).click()
+  await page.waitForURL(/\/publicaties\//, { timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: pubTitel, level: 1 })).toBeVisible()
+})
+
+When('I open a publicatie search result', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  const pubFilter = page.getByRole('checkbox', { name: /^Publicatie/ })
+  if (await pubFilter.isVisible().catch(() => false)) {
+    if (!(await pubFilter.isChecked()))
+      await pubFilter.check()
+    await expect(page).toHaveURL(/resultTypes=publication/)
+  }
+  const link = page.getByRole('link', { name: pubTitel })
+  await expect(link).toBeVisible({ timeout: 20_000 })
+  await link.click()
+  await page.waitForURL(/\/publicaties\//, { timeout: 15_000 })
+})
+
+Then('the publicatie result lists its coupled documenten', async ({ page, scratch }) => {
+  const docTitel = requireScratch(scratch, 'zoeken:docTitel')
+  await expect(page.getByRole('heading', { name: 'Documenten bij deze publicatie', level: 2 }))
+    .toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('link', { name: docTitel })).toBeVisible()
+})
+
+Then('the onderwerp lists its coupled publicaties', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  await expect(page.getByRole('heading', { name: 'Alle publicaties over dit onderwerp', level: 2 }))
+    .toBeVisible({ timeout: 20_000 })
+  await expect.poll(async () => page.locator('body').textContent(), INDEX).toContain(pubTitel)
+  await expect(page.getByRole('link', { name: pubTitel })).toBeVisible()
 })
 
 // --- Onderwerp detail page (manual step 4f) --------------------------------
@@ -289,90 +585,6 @@ When('I open a promoted onderwerp from the homepage carousel', async ({ page, to
   await carousel.getByRole('link', { name: titel }).click()
   await page.waitForLoadState('networkidle').catch(() => {})
   await expect(page).toHaveURL(/\/onderwerpen\//)
-})
-
-// --- @blocked stubs (bddgen registration only; Before(@blocked) skips) ------
-// Bodies intentionally throw — the @blocked hook skips before they run. Kept so
-// removing the tag later fails loudly until a real implementation lands.
-
-Then('the homepage shows counts of onderwerpen, publicaties and documenten', async () => {
-  throw new Error('BLOCKED: homepage counts require woo-search ES facets (POST /api/zoeken)')
-})
-
-When('I search the burgerportaal for a term in a document\'s contents', async () => {
-  throw new Error('BLOCKED: document-content search requires an active Elasticsearch index')
-})
-
-When('I search the burgerportaal for a term in an onderwerp\'s titel', async () => {
-  throw new Error('BLOCKED: onderwerp-titel search requires an active Elasticsearch index')
-})
-
-Then('the matching publicatie appears in the search results', async () => {
-  throw new Error('BLOCKED: asserting a search hit requires an active Elasticsearch index')
-})
-
-Then('the matching onderwerp appears in the search results', async () => {
-  throw new Error('BLOCKED: asserting a search hit requires an active Elasticsearch index')
-})
-
-When('I sort the search results chronologically', async () => {
-  throw new Error('BLOCKED: chronological result order requires indexed search hits')
-})
-
-Then('the search results are ordered by date', async () => {
-  throw new Error('BLOCKED: chronological result order requires indexed search hits')
-})
-
-When('I filter the search results by type', async () => {
-  throw new Error('BLOCKED: type facets require woo-search ES facet buckets')
-})
-
-Then('only search results matching the filter remain', async () => {
-  throw new Error('BLOCKED: filter assertions require woo-search ES facet buckets')
-})
-
-When('I activate a search result filter', async () => {
-  throw new Error('BLOCKED: cascading filter options require woo-search ES facet buckets')
-})
-
-Then('the remaining search filters only offer options that yield results', async () => {
-  throw new Error('BLOCKED: cascading filter options require woo-search ES facet buckets')
-})
-
-Then('the search results are paginated at ten per page', async () => {
-  throw new Error('BLOCKED: pagination UI only appears when ES returns count > page size')
-})
-
-When('I open a search result', async () => {
-  throw new Error('BLOCKED: opening a search result requires an indexed hit')
-})
-
-Then('the opened result shows its metadata', async () => {
-  throw new Error('BLOCKED: result metadata requires an indexed hit')
-})
-
-When('I open a document search result', async () => {
-  throw new Error('BLOCKED: document search results require an indexed document hit')
-})
-
-Then('the document result offers a download button', async () => {
-  throw new Error('BLOCKED: document download requires an indexed document hit')
-})
-
-Then('I can navigate from the document to its publicatie', async () => {
-  throw new Error('BLOCKED: document→publicatie navigation requires an indexed document hit')
-})
-
-When('I open a publicatie search result', async () => {
-  throw new Error('BLOCKED: publicatie search results require an indexed publicatie hit')
-})
-
-Then('the publicatie result lists its coupled documenten', async () => {
-  throw new Error('BLOCKED: coupled documenten require an indexed publicatie hit')
-})
-
-Then('the onderwerp lists its coupled publicaties', async () => {
-  throw new Error('BLOCKED: onderwerp publicatie list uses SearchGrid → POST /api/zoeken (ES)')
 })
 
 function escapeRegExp(value: string): string {

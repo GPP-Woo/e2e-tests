@@ -1,6 +1,7 @@
 import {
   collectAllUrlEntries,
   elementText,
+  elementTexts,
   entryMatchesDocumentUuid,
   entryMatchesOfficieleTitel,
   findDocumentEntry,
@@ -12,6 +13,10 @@ import {
 } from '@/bdd/@burgerportaal/support/sitemap'
 import {
   activateLandelijkeOrganisatie,
+  deleteDocumentViaToken,
+  informatieCategorieUuidByNaam,
+  patchDocument,
+  patchPublicatiestatus,
   seedDocument,
 } from '@/bdd/@publicatiebank/support/document'
 import { ENV } from '@/bdd/_core/types'
@@ -77,9 +82,8 @@ Then('every document entry carries the required DiWoo metadata', async ({ sitema
 
 // ---------------------------------------------------------------------------
 // Document membership / metadata / change-propagation steps.
-// Scenarios stay `@blocked` on stacks without a short sitemap cache override
-// and a landelijke publisher seed path (see sitemap.feature). Step bodies are
-// implemented so removing `@blocked` is enough once the env is ready.
+// Requires a short `SITEMAP_CACHE_DURATION_HOURS` (0 or ~1min) and
+// `SITEMAP_CACHE_WAIT_MS` for refetch. Mutations use token-API PATCH/DELETE.
 // ---------------------------------------------------------------------------
 
 function requireScratch(scratch: Map<string, string>, key: string): string {
@@ -101,6 +105,7 @@ async function seedTrackedDocument(
     withDates?: boolean
     verkorteTitel?: string
     omschrijving?: string
+    informatieCategorieUuids?: string[]
   },
 ) {
   const publicatieTitel = opts.publications.freshName()
@@ -126,6 +131,7 @@ async function seedTrackedDocument(
     creatiedatum,
     verkorteTitel: opts.verkorteTitel,
     omschrijving: opts.omschrijving,
+    informatieCategorieUuids: opts.informatieCategorieUuids,
     ...(opts.withDates
       ? { ontvangstdatum: creatiedatum, datumOndertekend: creatiedatum }
       : {}),
@@ -172,26 +178,28 @@ Given('a concept document in the Publicatiebank', async ({ organisations, public
 })
 
 Given('a withdrawn document in the Publicatiebank', async ({ organisations, publications, documents, scratch }) => {
+  // Create-as-ingetrokken is ignored by ODRC on upload (stays gepubliceerd);
+  // publish first, then PATCH.
   await seedTrackedDocument({
     organisations,
     publications,
     documents,
     scratch,
-    documentStatus: 'ingetrokken',
     landelijkePublisher: true,
   })
+  await patchPublicatiestatus('documenten', requireScratch(scratch, 'sitemap:docUuid'), 'ingetrokken')
 })
 
 Given('a document belonging to a withdrawn publication in the Publicatiebank', async ({ organisations, publications, documents, scratch }) => {
+  // Cannot create a publicatie directly as ingetrokken (400). Publish, then PATCH.
   await seedTrackedDocument({
     organisations,
     publications,
     documents,
     scratch,
-    documentStatus: 'gepubliceerd',
-    publicatieStatus: 'ingetrokken',
     landelijkePublisher: true,
   })
+  await patchPublicatiestatus('publicaties', requireScratch(scratch, 'sitemap:pubUuid'), 'ingetrokken')
 })
 
 Given('a published document in the Publicatiebank', async ({ organisations, publications, documents, scratch }) => {
@@ -210,15 +218,15 @@ Given('a published document with a manually added information category', async (
   // Self-added categories are what the testscript means by "manually added";
   // the sitemap substitutes them with the inspanningsverplichting art. 3.1 Woo label.
   const catNaam = await categories.add()
-  // Categories are admin-owned; resolve uuid via ODRC list by naam is flaky under
-  // token auth — seed with landelijke cats only for now and record the intent.
   scratch.set('sitemap:manualCatNaam', catNaam)
+  const catUuid = await informatieCategorieUuidByNaam(catNaam)
   await seedTrackedDocument({
     organisations,
     publications,
     documents,
     scratch,
     landelijkePublisher: true,
+    informatieCategorieUuids: [catUuid],
   })
 })
 
@@ -252,24 +260,25 @@ Given('a document whose metadata was changed in the GPP-app', async ({ organisat
     landelijkePublisher: true,
     omschrijving: `E2E pre-change ${Date.now()}`,
   })
-  scratch.set('sitemap:updatedOmschrijving', `E2E post-change ${Date.now()}`)
+  const updated = `E2E post-change ${Date.now()}`
+  scratch.set('sitemap:updatedOmschrijving', updated)
+  await patchDocument(requireScratch(scratch, 'sitemap:docUuid'), { omschrijving: updated })
+  scratch.set('sitemap:omschrijving', updated)
 })
 
 Given('a published document that is then withdrawn in the GPP-app', async ({ organisations, publications, documents, scratch }) => {
   await seedTrackedDocument({ organisations, publications, documents, scratch, landelijkePublisher: true })
-  // Status flip is the withdraw; done in-place via a second seed of ingetrokken
-  // is not possible on the same uuid — callers under @blocked re-seed after cache.
-  scratch.set('sitemap:withdrawPending', 'document')
+  await patchPublicatiestatus('documenten', requireScratch(scratch, 'sitemap:docUuid'), 'ingetrokken')
 })
 
 Given('a published publication that is then withdrawn in the GPP-app', async ({ organisations, publications, documents, scratch }) => {
   await seedTrackedDocument({ organisations, publications, documents, scratch, landelijkePublisher: true })
-  scratch.set('sitemap:withdrawPending', 'publicatie')
+  await patchPublicatiestatus('publicaties', requireScratch(scratch, 'sitemap:pubUuid'), 'ingetrokken')
 })
 
 Given('a published document that is then deleted in the Publicatiebank', async ({ organisations, publications, documents, scratch }) => {
   await seedTrackedDocument({ organisations, publications, documents, scratch, landelijkePublisher: true })
-  scratch.set('sitemap:deletePending', 'true')
+  await deleteDocumentViaToken(requireScratch(scratch, 'sitemap:docUuid'))
 })
 
 When('I collect every document entry across all sitemaps', async ({ sitemap, scratch }) => {
@@ -410,6 +419,9 @@ Then('the updated metadata appears in the current month\'s sitemap', async ({ si
   const uuid = requireScratch(scratch, 'sitemap:docUuid')
   const entry = entries.find(e => entryMatchesDocumentUuid(e, uuid))
   expect(entry).toBeTruthy()
+  const updated = scratch.get('sitemap:updatedOmschrijving')
+  if (updated)
+    expect(elementTextsSafe(entry!, 'omschrijving')).toContain(updated)
 })
 
 Then('the withdrawn document no longer appears in the current month\'s sitemap', async ({ sitemap, scratch }) => {
@@ -431,10 +443,9 @@ Then('the deleted document no longer appears in the current month\'s sitemap', a
 })
 
 function elementTextsSafe(xml: string, name: string): string[] {
-  const re = new RegExp(`<(?:\\w+:)?${name}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${name}>`, 'g')
-  return Array.from(xml.matchAll(re), m => m[1].trim())
+  return elementTexts(xml, name)
 }
 
 function hasAtTime(xml: string): boolean {
-  return /<(?:\w+:)?atTime[\s>]/.test(xml)
+  return /<(?:\w+:)?atTime(?=[\s/>])/.test(xml)
 }

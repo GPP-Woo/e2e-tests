@@ -10,11 +10,11 @@
 # Scope note: the burgerportaal's onderwerpen are served live from the
 # publicatiebank, so a freshly published onderwerp is browsable within seconds.
 # Full-text SEARCH results and the homepage counters come from woo-search's
-# Elasticsearch, whose harvest/index pipeline is a documented environment
-# prerequisite that is not active on the test stack (see sitemap.feature) — so we
-# assert the search *experience* (the results page opens) but not that freshly
-# seeded content is indexed. Documents are out of scope (no Documents API — see
-# PLAN-plateau4-remaining.md).
+# Elasticsearch. On this stack publish triggers ES indexing via
+# `gpp_search_service` (POST /api/zoeken returns facets + hits within seconds);
+# scenarios that assert hits seed unique content and poll until indexed.
+# Document *body* text is not ingested here without a download_url pipeline —
+# that one scenario stays @blocked.
 #
 # @no-webkit — the burgerportaal SPA never leaves its "wordt geladen…" splash in
 # WebKit on this stack (a WebKit-specific boot failure; Chromium and Firefox boot
@@ -45,10 +45,8 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
 
   # Manual step 1 (UPDATE maart 2026): "Onderaan de homepage is een info-blokje
   # toegevoegd met de aantallen onderwerpen, publicaties en documenten."
-  # @blocked: counts come from POST /api/zoeken (woo-search ES facets); on this
-  # stack that endpoint 500s and the UI shows "Er zijn geen statistieken
-  # beschikbaar..." — asserting numeric counts would fake a pass.
-  @blocked
+  # Counts come from POST /api/zoeken (woo-search ES facets). The endpoint is
+  # healthy here; counts may be 0 when the index is empty — 0 is a valid count.
   Scenario: The homepage shows an info block with content counts
     Given the burgerportaal homepage is open
     Then the homepage shows counts of onderwerpen, publicaties and documenten
@@ -87,7 +85,8 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
     Then I land on the search results page
 
   # Manual step 2: relevance — "gevonden wanneer de zoektermen voorkomen in het
-  # bestand". @blocked: needs an active Elasticsearch index with document hits.
+  # bestand". @blocked: document body text is not ingested without download_url
+  # (title/metadata index, not file body — verified against this stack).
   @blocked
   Scenario: A result is found by the contents of its document
     Given the burgerportaal homepage is open
@@ -95,8 +94,7 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
     Then the matching publicatie appears in the search results
 
   # Manual step 2: relevance — "gevonden wanneer de zoektermen voorkomen in de
-  # titel en/of de omschrijving". @blocked: needs an active Elasticsearch index.
-  @blocked
+  # titel en/of de omschrijving". Seeds a unique onderwerp titel and polls ES.
   Scenario: A result is found by its titel or omschrijving
     Given the burgerportaal homepage is open
     When I search the burgerportaal for a term in an onderwerp's titel
@@ -116,70 +114,65 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
     Then the results page reflects the edited query
 
   # Manual step 3: "gesorteerd op relevantie (standaard) of chronologisch."
-  # @blocked: selecting Chronologisch is UI-only; asserting result date order
-  # needs indexed hits (POST /api/zoeken 500s on this stack).
-  @blocked
   Scenario: Search results can be sorted chronologically
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I sort the search results chronologically
     Then the search results are ordered by date
 
   # Manual step 3: "gefilterd op datum, type, organisatie en/of informatiecategorie."
-  # @blocked: type/org/categorie facets only appear when /api/zoeken returns
-  # facet buckets; the endpoint 500s here.
-  @blocked
   Scenario: Search results can be filtered
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I filter the search results by type
     Then only search results matching the filter remain
 
   # Manual step 3: "Wanneer een filter geactiveerd wordt, worden de andere filters
   # bijgewerkt. Alleen opties die tot resultaten leiden worden getoond."
-  # @blocked: same ES/facets dependency as the filter scenario above.
-  @blocked
   Scenario: Activating a filter updates the other filters
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I activate a search result filter
     Then the remaining search filters only offer options that yield results
 
   # Manual step 3: "Er worden max 10 zoekresultaten getoond ... kan gebladerd worden."
-  # @blocked: pagination only renders when count > page size; needs indexed hits.
-  @blocked
+  # Seeds enough pub+doc pairs under one unique query to exceed page size.
   Scenario: Long result sets are paginated
-    Given the burgerportaal search results page is open
+    Given enough indexed search hits for pagination
+    And the burgerportaal search results page is open for the seeded content
     Then the search results are paginated at ten per page
 
   # --- Inspecting a search result (manual step 4) ----------------------------
 
   # Manual step 4: "Een zoekresultaat kan aangeklikt worden om te openen.
-  # Bovenaan worden de metadata getoond." @blocked: needs an indexed hit.
-  @blocked
+  # Bovenaan worden de metadata getoond."
   Scenario: A search result can be opened and shows its metadata
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I open a search result
     Then the opened result shows its metadata
 
   # Manual step 4: "Als het zoekresultaat een document betreft, dan staat er een
-  # download-knop." @blocked: needs an indexed document hit.
-  @blocked
+  # download-knop."
   Scenario: A document result offers a download
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I open a document search result
     Then the document result offers a download button
 
   # Manual step 4: "Als het zoekresultaat een document betreft, dan staat onderaan
-  # de publicatie waaraan het gekoppeld is." @blocked: needs an indexed document hit.
-  @blocked
+  # de publicatie waaraan het gekoppeld is."
   Scenario: A document result links to its publicatie
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I open a document search result
     Then I can navigate from the document to its publicatie
 
   # Manual step 4: "Als het zoekresultaat een publicatie betreft, dan staan onderaan
-  # de gekoppelde documenten." @blocked: needs an indexed publicatie hit.
-  @blocked
+  # de gekoppelde documenten."
   Scenario: A publicatie result lists its coupled documents
-    Given the burgerportaal search results page is open
+    Given an indexed publicatie with a document
+    And the burgerportaal search results page is open for the seeded content
     When I open a publicatie search result
     Then the publicatie result lists its coupled documenten
 
@@ -199,11 +192,8 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
     Then the onderwerp metadata is shown
 
   # Manual step 4f: "worden onderaan de publicaties getoond die eraan gekoppeld zijn."
-  # @blocked: the onderwerp detail lists coupled publicaties via SearchGrid →
-  # POST /api/zoeken, which 500s without ES; also needs a coupled publicatie seed.
-  @blocked
   Scenario: An opened onderwerp lists its coupled publicaties
-    Given a promoted, published onderwerp
+    Given a promoted, published onderwerp with a coupled publicatie
     When I open that onderwerp on the burgerportaal
     Then the onderwerp lists its coupled publicaties
 
