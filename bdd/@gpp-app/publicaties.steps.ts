@@ -7,6 +7,7 @@ import { expect, request as apiRequest } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
 import { waitForWithReload } from './support/hydrate'
 import {
+  addDocumentAndRepublishViaUi,
   addDocumentToNewPublicatieViaUi,
   attemptPublishWithOnlyTitelViaUi,
   bekijkOnlineLink,
@@ -17,6 +18,8 @@ import {
   createAndPublishViaUi,
   DOCUMENT_FIXTURE,
   documentDatumField,
+  documentIngetrokkenStatus,
+  documentIntrekkenCheckbox,
   documentTitelField,
   editTitelAndRepublishViaUi,
   filterPublicatiesViaUi,
@@ -34,6 +37,7 @@ import {
   visiblePublicatieTitels,
   visibleRegistratiedatums,
   withdrawButton,
+  withdrawDocumentViaUi,
   withdrawViaUi,
 } from './support/publicatie-ui'
 import { currentUserId } from './support/usergroup'
@@ -356,14 +360,16 @@ Then('the edited titel of the publicatie has persisted', async ({ page, publicat
   await expect(page.locator('#titel')).toHaveValue(publications.last())
 })
 
-When('I withdraw a single document on the publicatie and save it', async () => {
-  // @blocked — ODPC session POST/PUT /api/v2/documenten fail (500/404) in this stack.
-  throw new Error('BLOCKED: document withdraw via gpp-app needs working ODPC document mutations')
+When('I withdraw a single document on the publicatie and save it', async ({ page, publications }) => {
+  const titel = publications.last()
+  // Given publishes document-less; attach one first, then withdraw via UI.
+  await addDocumentAndRepublishViaUi(page, titel)
+  await withdrawDocumentViaUi(page, titel)
 })
 
-Then('the withdrawn document is still withdrawn', async () => {
-  // @blocked — see the matching When step / feature @blocked comment.
-  throw new Error('BLOCKED: document withdraw via gpp-app needs working ODPC document mutations')
+Then('the withdrawn document is still withdrawn', async ({ page }) => {
+  await expect(documentIngetrokkenStatus(page)).toBeVisible({ timeout: 15_000 })
+  await expect(documentIntrekkenCheckbox(page)).toHaveCount(0)
 })
 
 When('I click the Bekijk online button on the publicatie', async ({ page, publications, popup }) => {

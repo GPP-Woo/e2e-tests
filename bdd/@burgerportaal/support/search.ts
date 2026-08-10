@@ -198,6 +198,8 @@ export async function seedIndexedPublicationDocument(opts: {
   publicatieTitel?: string
   documentTitel?: string
   omschrijving?: string
+  /** Uploaded file body — use a unique token here for document-contents search. */
+  fileContent?: string | Buffer
 }): Promise<{ publicatie: any, document: any, token: string }> {
   const token = opts.token ?? `E2EZoek${Date.now()}`
   const publicatieTitel = opts.publicatieTitel ?? `${opts.publications.freshName()} ${token}`
@@ -209,6 +211,7 @@ export async function seedIndexedPublicationDocument(opts: {
     orgUuid: org.uuid,
     onderwerpen: opts.onderwerpen,
     omschrijving: opts.omschrijving,
+    fileContent: opts.fileContent,
   })
   opts.publications.track(publicatieTitel)
   opts.documents.track(documentTitel)

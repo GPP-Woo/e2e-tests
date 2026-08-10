@@ -238,13 +238,44 @@ When('I search the burgerportaal by clicking the Zoeken button', async ({ page }
   await submitHomepageSearch(page, 'woo', { via: 'button' })
 })
 
-// Document-body search remains @blocked (see feature); stubs stay for bddgen.
-When('I search the burgerportaal for a term in a document\'s contents', async () => {
-  throw new Error('BLOCKED: document body text not ingested without download_url')
+// Document-body search: unique token lives only in the file bytes (not titel),
+// so a hit proves attachment ingest via download_url worked.
+When('I search the burgerportaal for a term in a document\'s contents', async ({
+  page,
+  publications,
+  documents,
+  scratch,
+}) => {
+  const token = `E2EBody${Date.now()}`
+  const bodyOnly = `UNIQUE_BODY_TOKEN_${token}_IN_FILE`
+  scratch.set('zoeken:bodyToken', bodyOnly)
+  const { publicatie } = await seedIndexedPublicationDocument({
+    publications,
+    documents,
+    scratch,
+    token,
+    // Keep titel free of bodyOnly so the ES hit cannot be metadata-only.
+    publicatieTitel: `${publications.freshName()} meta${token}`,
+    documentTitel: `${documents.freshName()} meta${token}`,
+    fileContent: `${bodyOnly}\nplain text for attachment ingest\n`,
+  })
+  scratch.set('zoeken:pubTitel', publicatie.officieleTitel ?? scratch.get('zoeken:pubTitel')!)
+  await waitForZoekenHit(
+    bodyOnly,
+    hit => hit.type === 'document' && (hit.record.officieleTitel?.includes(`meta${token}`) ?? false),
+    { timeout: 90_000 },
+  )
+  await submitHomepageSearch(page, bodyOnly, { via: 'enter' })
 })
 
-Then('the matching publicatie appears in the search results', async () => {
-  throw new Error('BLOCKED: document body text not ingested without download_url')
+Then('the matching publicatie appears in the search results', async ({ page, scratch }) => {
+  const pubTitel = requireScratch(scratch, 'zoeken:pubTitel')
+  const docTitel = requireScratch(scratch, 'zoeken:docTitel')
+  // Document-body hits surface as `document` results (link = document titel);
+  // the parent publicatie titel may also appear in the card.
+  await expect(
+    page.getByRole('link', { name: docTitel }).or(page.getByRole('link', { name: pubTitel })),
+  ).toBeVisible({ timeout: 20_000 })
 })
 
 When('I search the burgerportaal for a term in an onderwerp\'s titel', async ({

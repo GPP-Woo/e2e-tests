@@ -104,8 +104,8 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # verifying the published state before editing, changing the profiel
   # (gebruikersgroep) business rule, persistence-after-reopen, the withdraw
   # confirmation dialog + withdrawn-state UI, the "Bekijk online" button, and
-  # the "Publicaties van collega's" claim flow. Document-level withdraw stays
-  # @blocked (ODPC document session mutations); colleague claim is implemented.
+  # the "Publicaties van collega's" claim flow. Document-level withdraw and
+  # colleague claim are implemented.
   # ==========================================================================
 
   Scenario: Open a published publicatie from Mijn publicaties before editing
@@ -125,11 +125,9 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     And I reopen the publicatie from my publicaties list
     Then the edited titel of the publicatie has persisted
 
-  # BLOCKED: ODPC session mutations for /api/v2/documenten fail in this stack
-  # (POST → 500, PUT → 404) even though the token Documenten API works. The
-  # gpp-app UI therefore cannot create or withdraw a document; re-enable once
-  # the ODPC→ODRC document proxy works under session auth.
-  @blocked
+  # Document withdraw: ODPC→ODRC document list/mutations work once OpenZaak
+  # SENDFILE is non-nginx (kind has no X-Accel consumer) and Documenten API is
+  # provisioned. Scenario adds a document, withdraws it via "Document intrekken".
   Scenario: A withdrawn document stays withdrawn after reopening
     Given a published publicatie owned by the signed-in user
     When I withdraw a single document on the publicatie and save it
@@ -157,5 +155,4 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     Then the current publicatie-eigenaar is shown before I claim it
 
 # Testscript 6: Complete
-# Testscript 7: Complete except document-withdraw persistence (@blocked — ODPC
-# document session mutations 500/404 in this stack).
+# Testscript 7: Complete (document-withdraw persistence included).

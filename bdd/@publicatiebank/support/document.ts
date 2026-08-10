@@ -130,6 +130,8 @@ export async function seedDocument(opts: {
   informatieCategorieUuids?: string[]
   /** Topic UUIDs to couple on the publicatie (burgerportaal onderwerp → publicaties). */
   onderwerpen?: string[]
+  /** Override the uploaded file bytes (default embeds the document titel). */
+  fileContent?: string | Buffer
 }): Promise<{ publicatie: any, document: any }> {
   const ctx = await apiRequest.newContext()
   try {
@@ -145,7 +147,9 @@ export async function seedDocument(opts: {
       onderwerpen: opts.onderwerpen ?? [],
       publicatiestatus: opts.publicatieStatus ?? 'gepubliceerd',
     })
-    const content = Buffer.from(`E2E document body for ${opts.documentTitel}\n`)
+    const content = Buffer.isBuffer(opts.fileContent)
+      ? opts.fileContent
+      : Buffer.from(opts.fileContent ?? `E2E document body for ${opts.documentTitel}\n`)
     const creatiedatum = opts.creatiedatum ?? new Date().toISOString().slice(0, 10)
     const doc = await postJson(ctx, 'documenten', {
       publicatie: pub.uuid,

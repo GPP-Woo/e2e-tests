@@ -19,17 +19,21 @@
 #   ./setup/provision-documenten-api.sh
 #
 # Verify: POST /api/v2/documenten no longer 500s "No documents API configured".
+# Also wires ODRC→zoeken indexing + zoeken→ODRC download (document body ingest).
 set -euo pipefail
 
 STACK="${STACK:-kind}"
 NAMESPACE="${NAMESPACE:-gpp-e2e}"
 ODRC_CONTAINER="${ODRC_CONTAINER:-gpp-woo-odrc-django-1}"
 OZ_CONTAINER="${OZ_CONTAINER:-gpp-woo-openzaak-web-1}"
+ZOEKEN_DEPLOY="${ZOEKEN_DEPLOY:-deploy/gpp-zoeken}"
 # Must match the openzaak fixture (applicatie + jwtsecret) so woo-publications
 # authenticates to OpenZaak's Documenten API.
 CLIENT_ID="${OZ_CLIENT_ID:-woo-publications-dev}"
 SECRET="${OZ_SECRET:-insecure-yQL9Rzh4eHGVmYx5w3J2gu}"
 RSIN="${ORG_RSIN:-123456782}"
+ZOEKEN_TOKEN="${ZOEKEN_TOKEN:-insecure-ea1a8d297e3b2d3313b8a30b18959c3}"
+ZOEKEN_ROOT="${ZOEKEN_ROOT:-http://gpp-zoeken:8000/api/v1/}"
 
 if [ "$STACK" = kind ]; then
   DRC_ROOT="${DRC_ROOT:-http://openzaak:8000/documenten/api/v1/}"
@@ -37,13 +41,20 @@ if [ "$STACK" = kind ]; then
   # the FQDN: Django's URLValidator rejects a dotless hostname, so OpenZaak would
   # reject the informatieobjecttype URL built from a bare svc name with 'bad-url'.
   ODRC_ROOT="${ODRC_ROOT:-http://gpp-publicatiebank-nginx.${NAMESPACE}.svc.cluster.local/catalogi/api/v1/}"
+  ODRC_DOWNLOAD_FQDN="${ODRC_DOWNLOAD_FQDN:-http://gpp-publicatiebank-nginx.${NAMESPACE}.svc.cluster.local/api/v2/}"
+  ODRC_DOWNLOAD_BARE="${ODRC_DOWNLOAD_BARE:-http://gpp-publicatiebank-nginx/api/v2/}"
   odrc_shell() { kubectl exec -n "$NAMESPACE" -i "deploy/gpp-publicatiebank" -- python /app/src/manage.py shell -c "$1"; }
   oz_shell() { kubectl exec -n "$NAMESPACE" -i "deploy/openzaak-web" -- python /app/src/manage.py shell -c "$1"; }
+  zoeken_shell() { kubectl exec -n "$NAMESPACE" -i "$ZOEKEN_DEPLOY" -- python /app/src/manage.py shell -c "$1"; }
 else
   DRC_ROOT="${DRC_ROOT:-http://openzaak.docker.internal:8001/documenten/api/v1/}"
   ODRC_ROOT="${ODRC_ROOT:-http://host.docker.internal:8000/catalogi/api/v1/}"
+  ODRC_DOWNLOAD_FQDN="${ODRC_DOWNLOAD_FQDN:-http://host.docker.internal:8000/api/v2/}"
+  ODRC_DOWNLOAD_BARE="${ODRC_DOWNLOAD_BARE:-http://host.docker.internal:8000/api/v2/}"
+  ZOEKEN_ROOT="${ZOEKEN_ROOT:-http://host.docker.internal:8110/api/v1/}"
   odrc_shell() { docker exec -i "$ODRC_CONTAINER" python /app/src/manage.py shell -c "$1"; }
   oz_shell() { docker exec -i "$OZ_CONTAINER" python /app/src/manage.py shell -c "$1"; }
+  zoeken_shell() { docker exec -i "${ZOEKEN_CONTAINER:-gpp-woo-zoeken-web-1}" python /app/src/manage.py shell -c "$1"; }
 fi
 
 odrc_shell "
@@ -64,12 +75,26 @@ svc, created = Service.objects.update_or_create(
         timeout=30,
     ),
 )
+zoeken, _ = Service.objects.update_or_create(
+    slug='gpp-zoeken',
+    defaults=dict(
+        label='GPP-zoeken (e2e)',
+        api_type=APITypes.orc,
+        api_root='${ZOEKEN_ROOT}',
+        auth_type=AuthTypes.api_key,
+        header_key='Authorization',
+        header_value='Token ${ZOEKEN_TOKEN}',
+        timeout=30,
+    ),
+)
 cfg = GlobalConfiguration.get_solo()
 cfg.documents_api_service = svc
+cfg.gpp_search_service = zoeken
 if not cfg.organisation_rsin:
     cfg.organisation_rsin = '${RSIN}'
 cfg.save()
 print('documenten-api service', 'created' if created else 'updated', '->', svc.api_root)
+print('gpp_search_service ->', zoeken.api_root)
 print('global config: documents_api_service=', cfg.documents_api_service_id, 'rsin=', cfg.organisation_rsin)
 "
 
@@ -87,4 +112,23 @@ svc, created = Service.objects.update_or_create(
     ),
 )
 print('catalogi service', 'created' if created else 'updated', '->', svc.api_root)
+"
+
+zoeken_shell "
+from zgw_consumers.models import Service
+from zgw_consumers.constants import APITypes, AuthTypes
+for i, root in enumerate(['${ODRC_DOWNLOAD_FQDN}', '${ODRC_DOWNLOAD_BARE}']):
+    svc, created = Service.objects.update_or_create(
+        slug=f'publicatiebank-download-{i}',
+        defaults=dict(
+            label=f'GPP-publicatiebank downloads ({root})',
+            api_type=APITypes.orc,
+            api_root=root,
+            auth_type=AuthTypes.api_key,
+            header_key='Authorization',
+            header_value='Token ${ZOEKEN_TOKEN}',
+            timeout=30,
+        ),
+    )
+    print(svc.slug, 'created' if created else 'updated', '->', svc.api_root)
 "

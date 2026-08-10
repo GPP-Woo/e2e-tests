@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { expect } from '@playwright/test'
 import path from 'node:path'
 import { ENV } from '@/bdd/_core/types'
 
@@ -217,20 +218,23 @@ async function selectProfiel(page: Page, profielUuid: string) {
 }
 
 /**
- * Create a publicatie under `profiel` and publish it (no documents — this stack
- * has no Documents API). The form itself is a dependent set of custom widgets (a
- * native profiel <select>, then a titel input plus organisatie-radio /
- * informatiecategorie-checkbox option-groups that only render once a profiel is
- * chosen), so it is filled deterministically by id/value — the same carve-out the
- * onderwerp add form uses for its file input. Publishing a document-less
- * publicatie opens a "Publicatie zonder documenten" confirm dialog ("Ja, publiceren").
+ * Create a publicatie under `profiel` and publish it (optionally with a
+ * document). Publishing without documents opens a "Publicatie zonder
+ * documenten" confirm dialog ("Ja, publiceren").
  */
-export async function createAndPublishViaUi(page: Page, opts: PublicatieInput) {
+export async function createAndPublishViaUi(page: Page, opts: PublicatieInput & { filePath?: string }) {
   await openNieuwePublicatieForm(page)
   await selectProfiel(page, opts.profielUuid)
   await fillTitel(page, opts.titel)
   await fillWaardelijstFields(page, opts)
-  // Publish (the action under test) and confirm the document-less publish.
+  if (opts.filePath) {
+    await page.locator('input[type="file"]').setInputFiles(opts.filePath)
+    await settle(page)
+    await page.getByRole('button', { name: 'Publiceren' }).click()
+    await settle(page)
+    // With a document attached there is no "zonder documenten" confirm.
+    return
+  }
   await publishAndConfirmViaUi(page)
 }
 
@@ -308,6 +312,65 @@ export function documentTitelField(page: Page) {
 /** The auto-filled document datum field after {@link addDocumentToNewPublicatieViaUi}. */
 export function documentDatumField(page: Page) {
   return documentenFieldset(page).getByLabel('Datum document *', { exact: true }).first()
+}
+
+/** Checkbox that marks an existing document for withdraw on the next Publiceren. */
+export function documentIntrekkenCheckbox(page: Page) {
+  return documentenFieldset(page).getByLabel('Document intrekken')
+}
+
+/** Status chip shown on a withdrawn document's summary. */
+export function documentIngetrokkenStatus(page: Page) {
+  return documentenFieldset(page).getByRole('status').filter({ hasText: 'ingetrokken' })
+}
+
+/**
+ * On an opened gepubliceerd publicatie that already has a document: tick
+ * "Document intrekken" and republish so the PUT sets `publicatiestatus=ingetrokken`.
+ */
+export async function withdrawDocumentViaUi(page: Page, titel: string) {
+  await openPublicatieViaUi(page, titel)
+  const fieldset = documentenFieldset(page)
+  // Existing documents render inside a closed <details>; open it so the
+  // "Document intrekken" checkbox is interactable.
+  await fieldset.locator('details summary').first().click()
+  await documentIntrekkenCheckbox(page).check()
+  const put = page.waitForResponse(
+    r => r.request().method() === 'PUT' && /\/api\/v2\/documenten\//.test(r.url()),
+    { timeout: 30_000 },
+  )
+  await page.getByRole('button', { name: 'Publiceren' }).click()
+  const res = await put
+  if (!res.ok())
+    throw new Error(`PUT documenten -> ${res.status()}: ${(await res.text()).slice(0, 300)}`)
+  await settle(page)
+}
+
+/**
+ * Attach {@link DOCUMENT_FIXTURE} to an already-open gepubliceerd publicatie and
+ * republish so ODPC creates+uploads the document.
+ */
+export async function addDocumentAndRepublishViaUi(page: Page, titel: string, filePath = DOCUMENT_FIXTURE) {
+  await openPublicatieViaUi(page, titel)
+  await page.locator('input[type="file"]').setInputFiles(filePath)
+  await settle(page)
+  await expect(documentTitelField(page)).not.toHaveValue('')
+  const post = page.waitForResponse(
+    r => r.request().method() === 'POST' && /\/api\/v2\/documenten\/?$/.test(new URL(r.url()).pathname),
+    { timeout: 60_000 },
+  )
+  const upload = page.waitForResponse(
+    r => r.request().method() === 'PUT' && /\/bestandsdelen\//.test(r.url()),
+    { timeout: 60_000 },
+  )
+  await page.getByRole('button', { name: 'Publiceren' }).click()
+  const res = await post
+  if (!res.ok())
+    throw new Error(`POST documenten -> ${res.status()}: ${(await res.text()).slice(0, 300)}`)
+  const up = await upload
+  if (!up.ok())
+    throw new Error(`PUT bestandsdeel -> ${up.status()}: ${(await up.text()).slice(0, 300)}`)
+  await settle(page)
 }
 
 /** Open a publicatie by titel from "Mijn publicaties". */

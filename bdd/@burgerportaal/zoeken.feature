@@ -13,8 +13,8 @@
 # Elasticsearch. On this stack publish triggers ES indexing via
 # `gpp_search_service` (POST /api/zoeken returns facets + hits within seconds);
 # scenarios that assert hits seed unique content and poll until indexed.
-# Document *body* text is not ingested here without a download_url pipeline —
-# that one scenario stays @blocked.
+# Document *body* search also needs OpenZaak SENDFILE (non-nginx) plus a zoeken
+# zgw Service whose api_root matches the document download_url Host.
 #
 # @no-webkit — the burgerportaal SPA never leaves its "wordt geladen…" splash in
 # WebKit on this stack (a WebKit-specific boot failure; Chromium and Firefox boot
@@ -85,9 +85,8 @@ Feature: Zoeken en raadplegen op het GPP-burgerportaal
     Then I land on the search results page
 
   # Manual step 2: relevance — "gevonden wanneer de zoektermen voorkomen in het
-  # bestand". @blocked: document body text is not ingested without download_url
-  # (title/metadata index, not file body — verified against this stack).
-  @blocked
+  # bestand". Seeds a unique body-only token (not in titel) so ES attachment
+  # ingest is what makes the hit — needs OpenZaak SENDFILE + zoeken download Service.
   Scenario: A result is found by the contents of its document
     Given the burgerportaal homepage is open
     When I search the burgerportaal for a term in a document's contents
