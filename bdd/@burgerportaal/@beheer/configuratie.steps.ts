@@ -1,6 +1,6 @@
 import type { ImageKind } from '@/bdd/@burgerportaal/support/beheer-config'
 import type { Page } from '@playwright/test'
-import type { Buffer } from 'node:buffer'
+import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -211,74 +211,141 @@ Then('the public {string} footer link is empty', async ({ beheer }, which: strin
 })
 
 // ===========================================================================
-// @todo stubs — gaps vs. manual TS1: verify the RENDERED public site, not just
-// the config. These are registered so bddgen stays green; the @todo Before hook
-// (bdd/_core/todo.steps.ts) skips the scenarios, so the bodies never execute.
-// Assertions read the public site deterministically through the plain Playwright
-// `page` fixture (public pages need no auth), mirroring the sibling admin steps.
+// Rendered public-site assertions (TS1 matrix gaps): not just the config API /
+// image bytes, but what a burger actually sees on the homepage.
 // ===========================================================================
 
-// Implement: page.goto(`${base}/`), settle, then assert a landmark of the burger
-// homepage is visible (e.g. the search field #search-field, or the header) so we
-// prove the portal renders — not merely that navigation returned a response.
+/** Fetch bytes from a URL as the public page would (relative → absolute). */
+async function fetchPageAsset(page: Page, url: string): Promise<Buffer> {
+  const absolute = new URL(url, page.url()).href
+  const res = await page.request.get(absolute)
+  expect(res.ok(), `GET ${absolute} -> ${res.status()}`).toBeTruthy()
+  return Buffer.from(await res.body())
+}
+
+/** Wait until the public image bytes differ from the pre-upload sha. */
+async function waitForImageChange(
+  beheer: { getPublicImage: (k: ImageKind) => Promise<{ bytes: Buffer }> },
+  kind: ImageKind,
+  beforeSha: string,
+): Promise<void> {
+  await expect.poll(async () => sha((await beheer.getPublicImage(kind)).bytes), POLL).not.toBe(beforeSha)
+}
+
 When('I open the public homepage as a burger', async ({ page }) => {
   await page.goto(`${base}/`)
-  throw new Error('TODO: goto the public homepage and settle so the load can be asserted')
+  await page.waitForLoadState('domcontentloaded')
 })
 
-Then('the public homepage loads successfully', async () => {
-  throw new Error('TODO: assert a burger-facing landmark (e.g. #search-field / main header) is visible on the public homepage')
+Then('the public homepage loads successfully', async ({ page }) => {
+  // Hero search field is the burger-facing landmark that only appears once the
+  // SPA has hydrated with resources (GppWooHero.vue).
+  await expect(page.locator('#search-field')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('navigation', { name: 'Hoofdmenu' })).toBeVisible()
 })
 
-// Implement: page.goto(`${base}/`), then assert an <iframe> whose src points at
-// the configured YouTube/Vimeo embed (resource(beheer,'videoUrl')) is present.
-Then('the public homepage renders the promotion video iframe', async () => {
-  throw new Error('TODO: assert the homepage renders an <iframe> with src matching the configured videoUrl embed')
+Then('the public homepage renders the promotion video iframe', async ({ page, beheer }) => {
+  await expect.poll(() => resource(beheer, 'videoUrl'), POLL).not.toBe('')
+  const videoUrl = await resource(beheer, 'videoUrl')
+  await page.goto(`${base}/`)
+  const iframe = page.locator('iframe[title="Uitleg Burgerportaal"]')
+  await expect(iframe).toBeVisible({ timeout: 20_000 })
+  await expect(iframe).toHaveAttribute('src', videoUrl)
 })
 
-// Implement: page.goto(`${base}/`), then assert no promotion-video <iframe> is
-// present (locator count is 0) once the videoUrl has been cleared.
-Then('the public homepage renders no promotion video iframe', async () => {
-  throw new Error('TODO: assert the homepage renders no promotion-video <iframe> after the video URL was cleared')
+Then('the public homepage renders no promotion video iframe', async ({ page, beheer }) => {
+  await expect.poll(() => resource(beheer, 'videoUrl'), POLL).toBe('')
+  await page.goto(`${base}/`)
+  await expect(page.locator('#search-field')).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('iframe[title="Uitleg Burgerportaal"]')).toHaveCount(0)
 })
 
-// Implement: page.goto(`${base}/`), read the rendered logo <img> src, fetch its
-// bytes and assert the sha matches the uploaded fixture (beheer.getPublicImage /
-// FIXTURE_IMAGES.logo) rather than the pre-test logo.
-Then('the public homepage displays the new logo', async () => {
-  throw new Error('TODO: read the homepage logo <img> and assert its bytes match the uploaded logo fixture')
+Then('the public homepage displays the new logo', async ({ page, beheer, beheerState }) => {
+  const before = beheerState.imageBefore.get('logo')!
+  await waitForImageChange(beheer, 'logo', before)
+  const publicSha = sha((await beheer.getPublicImage('logo')).bytes)
+
+  await page.goto(`${base}/`)
+  const logo = page.locator('.gpp-woo-logo')
+  await expect(logo).toBeVisible({ timeout: 20_000 })
+
+  // SVG logos are inlined from a <template> (GppWooLogo.vue); raster logos use <img>.
+  // Compare against the live public bytes (upload may normalise the file), not the
+  // raw fixture — the homepage must serve the same asset the API exposes.
+  const img = logo.locator('img')
+  if (await img.count()) {
+    const src = await img.getAttribute('src')
+    expect(src).toBeTruthy()
+    expect(sha(await fetchPageAsset(page, src!))).toBe(publicSha)
+  }
+  else {
+    await expect(logo.locator('svg')).toBeVisible()
+    const logoUrl = await resource(beheer, 'logoUrl')
+    expect(sha(await fetchPageAsset(page, logoUrl))).toBe(publicSha)
+    // Fixture logo.svg's purple fill survives SVG sanitisation — proves the
+    // inlined markup is the uploaded logo, not a stale organisation mark.
+    expect(await logo.innerHTML()).toMatch(/#7a2ff2/i)
+  }
 })
 
-// Implement: page.goto(`${base}/`), read <link rel="icon">/<link rel="shortcut
-// icon"> href, fetch it and assert its sha matches the uploaded favicon fixture.
-Then('the public homepage links to the new favicon', async () => {
-  throw new Error('TODO: read the <link rel="icon"> href and assert its bytes match the uploaded favicon fixture')
+Then('the public homepage links to the new favicon', async ({ page, beheer, beheerState }) => {
+  const before = beheerState.imageBefore.get('favicon')!
+  await waitForImageChange(beheer, 'favicon', before)
+  const publicSha = sha((await beheer.getPublicImage('favicon')).bytes)
+
+  await page.goto(`${base}/`)
+  const icon = page.locator('link[rel~="icon"]')
+  // Favicon <link> is rewritten during app boot from resources; poll until the
+  // href serves the same bytes as the public API (upload may convert PNG→ICO).
+  await expect.poll(async () => {
+    const href = await icon.getAttribute('href')
+    if (!href)
+      return ''
+    return sha(await fetchPageAsset(page, href))
+  }, POLL).toBe(publicSha)
 })
 
-// Implement: page.goto(`${base}/`), read the rendered sfeerfoto <img> (or CSS
-// background-image) and assert its bytes match the uploaded image fixture.
-Then('the public homepage displays the new sfeerfoto', async () => {
-  throw new Error('TODO: read the homepage sfeerfoto image and assert its bytes match the uploaded sfeerfoto fixture')
+Then('the public homepage displays the new sfeerfoto', async ({ page, beheer, beheerState }) => {
+  const before = beheerState.imageBefore.get('image')!
+  await waitForImageChange(beheer, 'image', before)
+  const publicSha = sha((await beheer.getPublicImage('image')).bytes)
+
+  await page.goto(`${base}/`)
+  const hero = page.locator('img.gpp-woo-hero__image')
+  await expect(hero).toBeVisible({ timeout: 20_000 })
+  await expect.poll(async () => {
+    const src = await hero.getAttribute('src')
+    if (!src)
+      return ''
+    return sha(await fetchPageAsset(page, src))
+  }, POLL).toBe(publicSha)
 })
 
-// Implement: page.goto(`${base}/`), locate the top-right "Naar de gemeente"
-// anchor and assert its href equals beheerState.expected.get('websiteUrl').
-Then('the "Naar de gemeente" link points to the new organisation website URL', async ({ beheerState }) => {
+Then('the "Naar de gemeente" link points to the new organisation website URL', async ({ page, beheer, beheerState }) => {
   const url = beheerState.expected.get('websiteUrl')!
-  throw new Error(`TODO: assert the "Naar de gemeente" link href equals ${url}`)
+  await expect.poll(() => resource(beheer, 'websiteUrl'), POLL).toBe(url)
+  await page.goto(`${base}/`)
+  // Nav label is `Naar ${organisationLabel}` (UtrechtNavBar.vue) — often
+  // "Naar de organisatie" / "Naar de gemeente", not a fixed string.
+  const link = page.getByRole('navigation', { name: 'Hoofdmenu' }).getByRole('link', { name: /^Naar / })
+  await expect(link).toBeVisible({ timeout: 20_000 })
+  await expect(link).toHaveAttribute('href', url)
 })
 
-// Implement: page.goto(`${base}/`), locate the footer anchor by its public label
-// (FOOTER_PUBLIC_LABEL[which]) and assert its href equals beheerState.expected
-// .get(`footer:${which}`).
-Then('the public {string} footer link points to the new URL', async ({ beheerState }, which: string) => {
+Then('the public {string} footer link points to the new URL', async ({ page, beheer, beheerState }, which: string) => {
   const url = beheerState.expected.get(`footer:${which}`)!
-  throw new Error(`TODO: assert the "${FOOTER_PUBLIC_LABEL[which]}" footer link href equals ${url}`)
+  await expect.poll(() => resource(beheer, FOOTER_FIELD[which]), POLL).toBe(url)
+  await page.goto(`${base}/`)
+  const link = page.locator('.gpp-woo-page-footer').getByRole('link', { name: FOOTER_PUBLIC_LABEL[which] })
+  await expect(link).toBeVisible({ timeout: 20_000 })
+  await expect(link).toHaveAttribute('href', url)
 })
 
-// Implement: page.goto(`${base}/`), assert the footer anchor labelled
-// FOOTER_PUBLIC_LABEL[which] is no longer rendered (locator count 0) once its
-// URL was removed and republished.
-Then('the public {string} footer link is no longer shown', async ({}, which: string) => {
-  throw new Error(`TODO: assert the "${FOOTER_PUBLIC_LABEL[which]}" footer link is no longer rendered in the footer`)
+Then('the public {string} footer link is no longer shown', async ({ page, beheer }, which: string) => {
+  await expect.poll(() => resource(beheer, FOOTER_FIELD[which]), POLL).toBe('')
+  await page.goto(`${base}/`)
+  await expect(page.locator('#search-field')).toBeVisible({ timeout: 20_000 })
+  await expect(
+    page.locator('.gpp-woo-page-footer').getByRole('link', { name: FOOTER_PUBLIC_LABEL[which] }),
+  ).toHaveCount(0)
 })

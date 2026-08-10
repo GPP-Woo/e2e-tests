@@ -110,7 +110,11 @@ export default defineConfig({
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
-      grepInvert: /@chromium-only|@ai/,
+      /* @no-webkit is excluded here rather than left to the runtime Before-skip:
+         both SPAs send `upgrade-insecure-requests`, which WebKit (unlike
+         Chromium/Firefox) also applies to http://localhost, so they never boot on
+         this plain-http stack. */
+      grepInvert: /@chromium-only|@ai|@no-webkit/,
       dependencies: ['setup'],
     },
   ],

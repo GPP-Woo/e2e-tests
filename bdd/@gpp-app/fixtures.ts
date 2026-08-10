@@ -43,8 +43,11 @@ export interface AuthProfileSeeder {
    * of one. With a single authorised value the form pre-selects it, so a
    * scenario that needs the required-field validation to fire must seed at
    * least two of each; the returned uuids are always the first of each.
+   *
+   * `extraGebruikerIds` adds further members (e.g. the regular user) so a
+   * colleague can publish under the same profiel.
    */
-  seed: (opts?: { onderwerpTitels?: string[], choices?: number }) => Promise<{ profielUuid: string, naam: string, organisatieUuid: string, informatiecategorieUuid: string }>
+  seed: (opts?: { onderwerpTitels?: string[], choices?: number, extraGebruikerIds?: string[] }) => Promise<{ profielUuid: string, naam: string, organisatieUuid: string, informatiecategorieUuid: string }>
 }
 
 export interface GppAppFixtures {
@@ -90,7 +93,7 @@ export const gppAppTest = publicatiebankTest.extend<GppAppFixtures>({
     const createdUuids: string[] = []
     try {
       await use({
-        async seed({ onderwerpTitels = [], choices = 1 } = {}) {
+        async seed({ onderwerpTitels = [], choices = 1, extraGebruikerIds = [] } = {}) {
           // Match membership on the caller's real identity claim, read from odpc.
           const gebruikerId = await currentUserId(ctx)
           // Owned + cleaned up by the organisations fixture; must be actief to appear.
@@ -105,7 +108,11 @@ export const gppAppTest = publicatiebankTest.extend<GppAppFixtures>({
           // group's waardelijsten — its "Onderwerp" section is absent otherwise.
           const onderwerpUuids = await Promise.all(onderwerpTitels.map(titel => resolveOnderwerpUuid(ctx, titel)))
           const naam = `E2E profiel ${testInfo.workerIndex}-${createdUuids.length}-${Date.now()}`
-          const uuid = await createAuthorisedGroup(ctx, { naam, gebruikerId, waardelijstUuids: [...orgUuids, ...cats.map(c => c.uuid), ...onderwerpUuids] })
+          const uuid = await createAuthorisedGroup(ctx, {
+            naam,
+            gebruikerIds: [gebruikerId, ...extraGebruikerIds],
+            waardelijstUuids: [...orgUuids, ...cats.map(c => c.uuid), ...onderwerpUuids],
+          })
           createdUuids.push(uuid)
           return { profielUuid: uuid, naam, organisatieUuid: orgUuid, informatiecategorieUuid: cat.uuid }
         },

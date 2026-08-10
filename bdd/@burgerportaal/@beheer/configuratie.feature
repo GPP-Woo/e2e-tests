@@ -70,23 +70,15 @@ Feature: Configureren van het burgerportaal
     And I publish the external links
     Then the public "privacy" footer link is empty
 
-  # ---------------------------------------------------------------------------
-  # @todo — gaps vs. manual TS1: the green scenarios above verify the config
-  # (API / image bytes) but NOT what a burger actually sees on the rendered
-  # public site. These @todo scenarios close that gap and are skipped-with-reason
-  # by the global Before({tags:'@todo'}) hook until their step bodies land.
-  # ---------------------------------------------------------------------------
+  # Gaps vs. manual TS1: the scenarios above verify the config (API / image
+  # bytes); these assert what a burger actually sees on the rendered public site.
 
-  # Matrix "Open the citizen portal" (Partial): no dedicated step proved the
-  # public portal simply loads for a burger.
-  @todo
+  # Matrix "Open the citizen portal" (Partial): prove the public portal loads.
   Scenario: Het burgerportaal laadt voor een burger
     When I open the public homepage as a burger
     Then the public homepage loads successfully
 
-  # Matrix "Add/Remove promotion video" (Partial): videoUrl config is checked,
-  # but not that the embedded YouTube/Vimeo iframe is rendered / gone.
-  @todo
+  # Matrix "Add/Remove promotion video": embedded YouTube/Vimeo iframe rendered / gone.
   Scenario: Promotievideo verschijnt en verdwijnt op de burger-homepage
     When I set the promotion video URL to "https://www.youtube.com/embed/cE0wfjsybIQ?si=5GAhLcJ3gevv6oLl"
     And I publish the homepage settings
@@ -95,39 +87,28 @@ Feature: Configureren van het burgerportaal
     And I publish the homepage settings
     Then the public homepage renders no promotion video iframe
 
-  # Matrix "Replace the logo" (Partial): bytes changed, but not that the homepage
-  # displays the new logo.
-  @todo
+  # Matrix "Replace the logo": homepage displays the new logo.
   Scenario: De burger-homepage toont het nieuwe logo
     When I replace the "logo" image
     Then the public homepage displays the new logo
 
-  # Matrix "Replace the favicon" (Partial): file changed, but not that the browser
-  # is served the new favicon.
-  @todo
+  # Matrix "Replace the favicon": browser is served the new favicon.
   Scenario: De burger-homepage gebruikt het nieuwe favicon
     When I replace the "favicon" image
     Then the public homepage links to the new favicon
 
-  # Matrix "Replace the atmosphere image" (Partial): bytes changed, but not that
-  # the homepage displays the new sfeerfoto.
-  @todo
+  # Matrix "Replace the atmosphere image": homepage displays the new sfeerfoto.
   Scenario: De burger-homepage toont de nieuwe sfeerfoto
     When I replace the "image" image
     Then the public homepage displays the new sfeerfoto
 
-  # Matrix "Change the organisation website URL" (Partial): websiteUrl config is
-  # checked, but not that the "Naar de gemeente" link points at the new URL.
-  @todo
+  # Matrix "Change the organisation website URL": "Naar …" nav link points at it.
   Scenario: De link "Naar de gemeente" wijst naar de nieuwe organisatie-URL
     When I set the organisation website URL to "https://e2e.example.org/gemeente"
     And I publish the external links
     Then the "Naar de gemeente" link points to the new organisation website URL
 
-  # Matrix "Change/Remove footer links" (Partial): the config values are checked,
-  # but not the footer anchors' href on the public site, nor that a removed link
-  # disappears.
-  @todo
+  # Matrix "Change/Remove footer links": footer anchor href / disappearance.
   Scenario: Voettekst-link wijst naar de nieuwe URL en verdwijnt na verwijderen
     When I set the "privacy" footer link to "https://e2e.example.org/privacy"
     And I publish the external links

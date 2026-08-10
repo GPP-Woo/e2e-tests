@@ -61,8 +61,7 @@ Feature: Configureren van onderwerpen
     Then only onderwerpen matching the filter remain visible
 
   # Manual step 4 (3e/5c): cross-application — the onderwerpen must match the
-  # onderwerpen shown under a gebruikersgroep in the GPP-app.
-  @todo
+  # onderwerpen shown under a gebruikersgroep in the GPP-app (odpc waardelijst).
   Scenario: Onderwerpen match the GPP-app gebruikersgroep
     Given an onderwerp
     When I open a GPP-app gebruikersgroep to compare onderwerpen

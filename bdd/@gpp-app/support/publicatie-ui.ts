@@ -371,7 +371,14 @@ function parseRegistratiedatum(label: string): Date {
 
 /** The "Registratiedatum: ..." dates currently visible in "Mijn publicaties", in list order. */
 export async function visibleRegistratiedatums(page: Page): Promise<Date[]> {
-  const labels = await page.getByText(/Registratiedatum:/).allTextContents()
+  // The date lives in the <dd> next to the <dt>Registratiedatum:</dt>
+  // (PublicatiesOverviewResult.vue). Matching the text itself also picks up that
+  // bare <dt>, which carries no date at all.
+  const labels = await page
+    .locator('dl')
+    .filter({ has: page.getByText('Registratiedatum:', { exact: true }) })
+    .locator('dd')
+    .allTextContents()
   return labels.map(parseRegistratiedatum)
 }
 
@@ -472,4 +479,38 @@ export async function withdrawViaUi(page: Page, titel: string) {
   if (await confirmButton.isVisible().catch(() => false))
     await confirmButton.click()
   await settle(page)
+}
+
+/** Navigate to "Publicaties van collega's" from the app root. */
+export async function openCollegaPublicaties(page: Page) {
+  await page.goto(gppApp)
+  await settle(page)
+  await page.getByRole('link', { name: "Publicaties van collega's" }).click()
+  await settle(page)
+}
+
+/**
+ * Open `titel` from "Publicaties van collega's", selecting `profielUuid` in the
+ * Gebruikersgroep picker when it isn't already the active filter (a single
+ * mijn-gebruikersgroep is auto-selected by the SPA).
+ */
+export async function openCollegaPublicatieViaUi(page: Page, titel: string, profielUuid: string) {
+  await openCollegaPublicaties(page)
+  const select = page.locator('#eigenaarGroep')
+  await select.waitFor({ state: 'visible' })
+  if (await select.inputValue() !== profielUuid)
+    await select.selectOption(profielUuid)
+  await settle(page)
+  await page.getByText(titel, { exact: true }).click()
+  await settle(page)
+}
+
+/** The "Publicatie-eigenaar" value on an opened publicatie detail form. */
+export function publicatieEigenaar(page: Page) {
+  return page.locator('dt').filter({ hasText: 'Publicatie-eigenaar' }).locator('xpath=following-sibling::dd[1]')
+}
+
+/** The "Publicatie claimen" button shown when viewing a colleague's publicatie. */
+export function claimButton(page: Page) {
+  return page.getByRole('button', { name: 'Publicatie claimen' })
 }

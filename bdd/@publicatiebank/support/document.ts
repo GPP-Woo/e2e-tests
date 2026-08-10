@@ -100,42 +100,62 @@ async function organisatieUuidByNaam(ctx: APIRequestContext, naam: string): Prom
 }
 
 /**
- * Seed a `gepubliceerd` publicatie owning a `gepubliceerd` document (with real
- * uploaded content) through the token API. `orgNaam` must be an existing actief
- * organisatie (seed one via the `organisations` fixture first). Runs in a
- * throwaway cookieless request context so a stray session cookie never turns the
- * token request into a 401.
+ * Seed a publicatie owning a document (with real uploaded content) through the
+ * token API. Defaults to both `gepubliceerd`. `orgNaam` must be an existing
+ * actief organisatie (seed one via the `organisations` fixture first), unless
+ * `orgUuid` is provided (e.g. a landelijke waardelijst org the DiWoo sitemap
+ * accepts — it skips `zelf_toegevoegd` publishers).
+ *
+ * Returns the created publicatie/document payloads so callers can compare
+ * sitemap metadata without a second read (token GETs flake under admin load).
  *
  * Requires `setup/provision-documenten-api.sh` to have been run on the stack: it
  * wires the Documenten API and patches ODRC token auth to return AnonymousUser,
  * without which these token requests 500 in the sessionprofile middleware (see
  * getJson). A `docker compose down`/`up` reverts the patch — re-run the script.
  */
-export async function seedPublishedDocument(
-  publicatieTitel: string,
-  documentTitel: string,
-  orgNaam: string,
-): Promise<void> {
+export async function seedDocument(opts: {
+  publicatieTitel: string
+  documentTitel: string
+  orgNaam?: string
+  orgUuid?: string
+  publicatieStatus?: 'concept' | 'gepubliceerd' | 'ingetrokken'
+  documentStatus?: 'concept' | 'gepubliceerd' | 'ingetrokken'
+  creatiedatum?: string
+  ontvangstdatum?: string | null
+  datumOndertekend?: string | null
+  verkorteTitel?: string
+  omschrijving?: string
+  verantwoordelijkeUuid?: string
+  informatieCategorieUuids?: string[]
+}): Promise<{ publicatie: any, document: any }> {
   const ctx = await apiRequest.newContext()
   try {
-    const orgUuid = await organisatieUuidByNaam(ctx, orgNaam)
-    const catUuid = await firstInformatieCategorieUuid(ctx)
+    const orgUuid = opts.orgUuid ?? await organisatieUuidByNaam(ctx, opts.orgNaam!)
+    const catUuids = opts.informatieCategorieUuids?.length
+      ? opts.informatieCategorieUuids
+      : [await firstInformatieCategorieUuid(ctx)]
     const pub = await postJson(ctx, 'publicaties', {
-      officieleTitel: publicatieTitel,
+      officieleTitel: opts.publicatieTitel,
       publisher: orgUuid,
-      informatieCategorieen: [catUuid],
-      publicatiestatus: 'gepubliceerd',
+      verantwoordelijke: opts.verantwoordelijkeUuid ?? orgUuid,
+      informatieCategorieen: catUuids,
+      publicatiestatus: opts.publicatieStatus ?? 'gepubliceerd',
     })
-    const content = Buffer.from(`E2E document body for ${documentTitel}\n`)
-    const creatiedatum = new Date().toISOString().slice(0, 10)
+    const content = Buffer.from(`E2E document body for ${opts.documentTitel}\n`)
+    const creatiedatum = opts.creatiedatum ?? new Date().toISOString().slice(0, 10)
     const doc = await postJson(ctx, 'documenten', {
       publicatie: pub.uuid,
-      officieleTitel: documentTitel,
+      officieleTitel: opts.documentTitel,
+      verkorteTitel: opts.verkorteTitel ?? '',
+      omschrijving: opts.omschrijving ?? '',
       bestandsnaam: 'e2e.txt',
       bestandsformaat: 'text/plain',
       bestandsomvang: content.length,
       creatiedatum,
-      publicatiestatus: 'gepubliceerd',
+      ontvangstdatum: opts.ontvangstdatum ?? undefined,
+      datumOndertekend: opts.datumOndertekend ?? undefined,
+      publicatiestatus: opts.documentStatus ?? 'gepubliceerd',
     })
     for (const bd of doc.bestandsdelen ?? []) {
       // The upload URL comes back on ODRC_HOST (the seed's Host); PUT it on the
@@ -154,6 +174,60 @@ export async function seedPublishedDocument(
       if (!up.ok())
         throw new Error(`PUT bestandsdeel -> ${up.status()}: ${(await up.text()).slice(0, 200)}`)
     }
+    return { publicatie: pub, document: doc }
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
+/**
+ * Seed a `gepubliceerd` publicatie owning a `gepubliceerd` document (with real
+ * uploaded content) through the token API. `orgNaam` must be an existing actief
+ * organisatie (seed one via the `organisations` fixture first). Runs in a
+ * throwaway cookieless request context so a stray session cookie never turns the
+ * token request into a 401.
+ *
+ * Requires `setup/provision-documenten-api.sh` to have been run on the stack: it
+ * wires the Documenten API and patches ODRC token auth to return AnonymousUser,
+ * without which these token requests 500 in the sessionprofile middleware (see
+ * getJson). A `docker compose down`/`up` reverts the patch — re-run the script.
+ */
+export async function seedPublishedDocument(
+  publicatieTitel: string,
+  documentTitel: string,
+  orgNaam: string,
+): Promise<void> {
+  await seedDocument({ publicatieTitel, documentTitel, orgNaam })
+}
+
+/**
+ * Activate a landelijke (non-`zelf_toegevoegd`) organisatie and return its uuid
+ * + naam. The DiWoo sitemap skips zelf_toegevoegd publishers, so sitemap
+ * membership scenarios must seed against a landelijke org — the portable
+ * `organisations.add()` path cannot satisfy that.
+ */
+export async function activateLandelijkeOrganisatie(): Promise<{ uuid: string, naam: string }> {
+  const ctx = await apiRequest.newContext()
+  try {
+    let next: string | null = 'organisaties?pageSize=100&isActief=alle'
+    while (next) {
+      const page = await getJson(ctx, next)
+      const hit = (page.results ?? []).find((o: { oorsprong?: string }) => o.oorsprong && o.oorsprong !== 'zelf_toegevoegd')
+      if (hit) {
+        const patched = await ctx.patch(new URL(`organisaties/${hit.uuid}`, API_BASE).href, {
+          headers: tokenHeaders({ 'Content-Type': 'application/json' }),
+          data: { isActief: true },
+        })
+        if (!patched.ok())
+          throw new Error(`PATCH organisatie ${hit.uuid} -> ${patched.status()}: ${(await patched.text()).slice(0, 200)}`)
+        return { uuid: hit.uuid as string, naam: hit.naam as string }
+      }
+      next = page.next
+        ? String(page.next).replace(/^https?:\/\/[^/]+\/api\/v2\//, '')
+        : null
+    }
+    throw new Error('No landelijke (non-zelf_toegevoegd) organisatie found in ODRC')
   }
   finally {
     await ctx.dispose()

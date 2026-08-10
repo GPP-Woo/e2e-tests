@@ -1,7 +1,9 @@
+import { resolveOnderwerpUuid } from '@/bdd/@gpp-app/support/usergroup'
 import { openAdminSection } from '@/bdd/@publicatiebank/support/login'
 import { TOPIC_IMAGE, topicExists, topicIsPromoted, topicOmschrijving } from '@/bdd/@publicatiebank/support/topic'
+import { adminState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
-import { expect } from '@playwright/test'
+import { request as apiRequest, expect } from '@playwright/test'
 import { Given, Then, When } from '../../_core/fixture'
 
 /**
@@ -109,9 +111,6 @@ Then('the onderwerp is shown in the admin results', async ({ page, topics }) => 
   expect(await topicExists(page, titel)).toBe(true)
 })
 
-// --- @todo stubs: gaps vs. manual testscript 3 (bodies not yet implemented) -
-// Registered so bddgen stays green; the @todo Before hook skips the scenarios.
-
 // --- Sort (UI read under test) ---------------------------------------------
 
 When('I sort the onderwerpen list by titel', async ({ page }) => {
@@ -137,16 +136,28 @@ Then('only onderwerpen matching the filter remain visible', async ({ page }) => 
 })
 
 // --- Compare with the GPP-app (cross-application) --------------------------
+// The gebruikersgroep authorisatie UI lists onderwerpen from the same odpc
+// waardelijst (`/api/v2/onderwerpen`) that resolveOnderwerpUuid reads — assert
+// against that rather than driving the SPA form (TS5 covers the UI).
 
-When('I open a GPP-app gebruikersgroep to compare onderwerpen', async () => {
-  // Impl: drive the gpp-app admin to open a gebruikersgroep and read its onderwerpen,
-  // or read them over the odpc API (see @gpp-app/support/usergroup.ts).
-  throw new Error('TODO: open a GPP-app gebruikersgroep and collect its onderwerpen for comparison')
+When('I open a GPP-app gebruikersgroep to compare onderwerpen', async ({ topics, scratch }) => {
+  const titel = topics.last()
+  const ctx = await apiRequest.newContext({ storageState: adminState })
+  try {
+    await expect.poll(() => resolveOnderwerpUuid(ctx, titel).then(() => true, () => false), READ).toBe(true)
+    scratch.set('gpp:onderwerpUuid', await resolveOnderwerpUuid(ctx, titel))
+    scratch.set('gpp:onderwerpTitel', titel)
+  }
+  finally {
+    await ctx.dispose()
+  }
 })
 
-Then('the onderwerp appears in the gebruikersgroep onderwerpen in the GPP-app', async () => {
-  // Impl: assert topics.last() is present among the gebruikersgroep onderwerpen read above.
-  throw new Error('TODO: assert the onderwerp is listed among the GPP-app gebruikersgroep onderwerpen')
+Then('the onderwerp appears in the gebruikersgroep onderwerpen in the GPP-app', async ({ topics, scratch }) => {
+  expect(scratch.get('gpp:onderwerpTitel')).toBe(topics.last())
+  expect(scratch.get('gpp:onderwerpUuid')).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  )
 })
 
 // --- Logging after edit ("Toon logs", UI read under test) ------------------

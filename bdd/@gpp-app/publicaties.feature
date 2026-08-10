@@ -36,8 +36,7 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # Gaps from the manual testscript not covered by the two green scenarios
   # above: onderwerpen selection, automatic document title/date, required-field
   # validation, the save-as-concept flow, and the "Mijn publicaties" list
-  # search / filter / sort / open behaviours. All @todo (skipped by the global
-  # Before hook) until the gpp-app SPA driver grows the matching helpers.
+  # search / filter / sort / open behaviours.
   # ==========================================================================
 
   Scenario: Select onderwerpen when creating a publicatie
@@ -105,7 +104,8 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # verifying the published state before editing, changing the profiel
   # (gebruikersgroep) business rule, persistence-after-reopen, the withdraw
   # confirmation dialog + withdrawn-state UI, the "Bekijk online" button, and
-  # the "Publicaties van collega's" claim flow. All @todo.
+  # the "Publicaties van collega's" claim flow. Document-level withdraw stays
+  # @blocked (ODPC document session mutations); colleague claim is implemented.
   # ==========================================================================
 
   Scenario: Open a published publicatie from Mijn publicaties before editing
@@ -125,7 +125,11 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     And I reopen the publicatie from my publicaties list
     Then the edited titel of the publicatie has persisted
 
-  @todo
+  # BLOCKED: ODPC session mutations for /api/v2/documenten fail in this stack
+  # (POST → 500, PUT → 404) even though the token Documenten API works. The
+  # gpp-app UI therefore cannot create or withdraw a document; re-enable once
+  # the ODPC→ODRC document proxy works under session auth.
+  @blocked
   Scenario: A withdrawn document stays withdrawn after reopening
     Given a published publicatie owned by the signed-in user
     When I withdraw a single document on the publicatie and save it
@@ -147,13 +151,11 @@ Feature: Publicaties creëren en intrekken in de GPP-app
     And the opened publicatie shows the ingetrokken message
     And the Bekijk online button is no longer shown on the publicatie
 
-  @todo
   Scenario: View a colleague's publicatie owner before claiming it
     Given a published publicatie owned by a colleague in my gebruikersgroep
     When I open a colleague publicatie under the collega publicaties menu and choose a profiel
     Then the current publicatie-eigenaar is shown before I claim it
 
 # Testscript 6: Complete
-# Testscript 7: Complete except for two scenarios that have legitimate infrastructure dependencies:
-# Document withdrawal persistence.
-# Colleague ownership/claim flow.
+# Testscript 7: Complete except document-withdraw persistence (@blocked — ODPC
+# document session mutations 500/404 in this stack).

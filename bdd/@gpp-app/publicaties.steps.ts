@@ -1,8 +1,9 @@
 import path from 'node:path'
 import { expectNoSearchResults, searchPublicatieViaUi } from '@/bdd/@burgerportaal/support/search'
 import { publicationOnderwerpenAdmin, publicationStatusAdmin } from '@/bdd/@publicatiebank/support/publication'
+import { regularState } from '@/bdd/_core/roles'
 import { ENV } from '@/bdd/_core/types'
-import { expect } from '@playwright/test'
+import { expect, request as apiRequest } from '@playwright/test'
 import { Given, Then, When } from '../_core/fixture'
 import { waitForWithReload } from './support/hydrate'
 import {
@@ -10,6 +11,7 @@ import {
   attemptPublishWithOnlyTitelViaUi,
   bekijkOnlineLink,
   changeProfielAndRepublishViaUi,
+  claimButton,
   clickBekijkOnlineViaUi,
   conceptStatusBanner,
   createAndPublishViaUi,
@@ -20,10 +22,12 @@ import {
   filterPublicatiesViaUi,
   ingetrokkenStatusBanner,
   intrekkenDialog,
+  openCollegaPublicatieViaUi,
   openMijnPublicaties,
   openOptionGroup,
   openPublicatieViaUi,
   optionGroupError,
+  publicatieEigenaar,
   saveAsConceptViaUi,
   searchPublicatiesByDateViaUi,
   sortPublicatiesViaUi,
@@ -32,6 +36,7 @@ import {
   withdrawButton,
   withdrawViaUi,
 } from './support/publicatie-ui'
+import { currentUserId } from './support/usergroup'
 
 /**
  * Testscripts 6 & 7 (eindgebruiker publicatie flows) steps. The authorised
@@ -245,7 +250,9 @@ Then('only the matching publicaties are shown in my publicaties list', async ({ 
 // --- Sort by titel -----------------------------------------------------------
 
 When('I sort my publicaties by titel', async ({ page }) => {
-  await sortPublicatiesViaUi(page, 'titel')
+  // The option's value is the API ordering field, not the label
+  // (PublicatiesOverviewSort.vue): "Title (a-z)" is `officiele_titel`.
+  await sortPublicatiesViaUi(page, 'officiele_titel')
 })
 
 Then('my publicaties are ordered by titel', async ({ page }) => {
@@ -279,13 +286,8 @@ Then('the publicatie opens with its saved details', async ({ page, publications 
 })
 
 // ===========================================================================
-// @todo stubs — gaps between the manual testscripts (TS6/TS7) and the two
-// green scenarios above. These throw until the gpp-app driver
-// (support/publicatie-ui.ts) grows the matching helpers; the global
-// Before({tags:'@todo'}) hook skips the scenarios so bddgen stays green.
+// TS7 — document withdraw (@blocked) + colleague claim
 // ===========================================================================
-
-// --- TS6 gaps: creëren van een publicatie ----------------------------------
 
 Then('the concept publicatie is not visible on the burgerportaal', async ({ page, publications }) => {
   const titel = publications.last()
@@ -355,13 +357,13 @@ Then('the edited titel of the publicatie has persisted', async ({ page, publicat
 })
 
 When('I withdraw a single document on the publicatie and save it', async () => {
-  // Open a document on the publicatie, click its "intrekken", then save the publicatie.
-  throw new Error('TODO: withdraw a single document and save')
+  // @blocked — ODPC session POST/PUT /api/v2/documenten fail (500/404) in this stack.
+  throw new Error('BLOCKED: document withdraw via gpp-app needs working ODPC document mutations')
 })
 
 Then('the withdrawn document is still withdrawn', async () => {
-  // On reopen, assert the document is still shown as ingetrokken (irreversible).
-  throw new Error('TODO: assert the withdrawn document stays withdrawn after reopening')
+  // @blocked — see the matching When step / feature @blocked comment.
+  throw new Error('BLOCKED: document withdraw via gpp-app needs working ODPC document mutations')
 })
 
 When('I click the Bekijk online button on the publicatie', async ({ page, publications, popup }) => {
@@ -405,20 +407,54 @@ Then('the Bekijk online button is no longer shown on the publicatie', async ({ p
   await expect(bekijkOnlineLink(page)).toHaveCount(0)
 })
 
-Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ authProfile, publications, scratch }) => {
-  // Seed a shared gebruikersgroep + a published publicatie owned by a *different* member (colleague) via API/admin.
-  void authProfile
-  void publications
-  void scratch
-  throw new Error('TODO: seed a colleague-owned published publicatie in a shared gebruikersgroep')
+Given('a published publicatie owned by a colleague in my gebruikersgroep', async ({ browser, page, authProfile, publications, scratch }) => {
+  // Shared profiel: signed-in admin + regular user. The colleague publishes under
+  // that profiel in a separate browser context (regularState); the scenario's
+  // `page` stays on the admin session to open it via "Publicaties van collega's".
+  const regularCtx = await apiRequest.newContext({ storageState: regularState })
+  let colleagueId: string
+  let colleagueName: string
+  try {
+    colleagueId = await currentUserId(regularCtx)
+    const me = await (await regularCtx.get(new URL('/api/me', ENV.apps.gppApp).href)).json()
+    colleagueName = me.fullName as string
+  }
+  finally {
+    await regularCtx.dispose()
+  }
+
+  const { profielUuid, organisatieUuid, informatiecategorieUuid } = await authProfile.seed({
+    extraGebruikerIds: [colleagueId],
+  })
+  scratch.set('profielUuid', profielUuid)
+  scratch.set('colleagueName', colleagueName)
+
+  const colleagueBrowser = await browser.newContext({ storageState: regularState })
+  const colleaguePage = await colleagueBrowser.newPage()
+  try {
+    const titel = publications.freshName()
+    await createAndPublishViaUi(colleaguePage, {
+      profielUuid,
+      organisatieUuid,
+      informatiecategorieUuid,
+      titel,
+    })
+    publications.track(titel)
+  }
+  finally {
+    await colleagueBrowser.close()
+  }
+  // Status read-back uses the admin `page` (Django admin session), not the colleague context.
+  await expect.poll(() => publicationStatusAdmin(page, publications.last()), READ).toBe('gepubliceerd')
 })
 
-When('I open a colleague publicatie under the collega publicaties menu and choose a profiel', async () => {
-  // Navigate root -> "Publicaties van collega's", choose the profiel when prompted, open the colleague publicatie.
-  throw new Error('TODO: open a colleague publicatie via "Publicaties van collega\'s" choosing a profiel')
+When('I open a colleague publicatie under the collega publicaties menu and choose a profiel', async ({ page, publications, scratch }) => {
+  await openCollegaPublicatieViaUi(page, publications.last(), scratch.get('profielUuid')!)
 })
 
-Then('the current publicatie-eigenaar is shown before I claim it', async () => {
-  // Assert the "Publicatie-eigenaar" field shows the colleague (not the signed-in user) before claiming.
-  throw new Error('TODO: assert the current publicatie-eigenaar is the colleague before claiming')
+Then('the current publicatie-eigenaar is shown before I claim it', async ({ page, scratch }) => {
+  await expect(publicatieEigenaar(page)).toHaveText(scratch.get('colleagueName')!)
+  // Claim is available precisely when the viewer is not the owner — proof we
+  // opened a colleague's publicatie rather than our own.
+  await expect(claimButton(page)).toBeVisible()
 })

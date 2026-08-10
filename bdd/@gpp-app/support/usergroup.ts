@@ -141,17 +141,23 @@ export async function informatiecategorieen(ctx: APIRequestContext, count: numbe
  * Create a gebruikersgroep with the given member(s) and authorised waardelijst
  * uuids (organisatie + informatiecategorie) over the odpc API. Returns its uuid.
  * The caller must have the odpc-admin role (the admin session does).
+ *
+ * Pass `gebruikerIds` when several members must share the group (e.g. the
+ * colleague-claim flow); `gebruikerId` alone remains the single-member shortcut.
  */
 export async function createAuthorisedGroup(
   ctx: APIRequestContext,
-  opts: { naam: string, gebruikerId: string, waardelijstUuids: string[] },
+  opts: { naam: string, gebruikerId?: string, gebruikerIds?: string[], waardelijstUuids: string[] },
 ): Promise<string> {
+  const gekoppeldeGebruikers = opts.gebruikerIds ?? (opts.gebruikerId ? [opts.gebruikerId] : [])
+  if (!gekoppeldeGebruikers.length)
+    throw new Error('createAuthorisedGroup requires gebruikerId or gebruikerIds')
   const res = await ctx.post(apiUrl('/api/gebruikersgroepen'), {
     data: {
       naam: opts.naam,
       omschrijving: 'E2E authorised profiel (prerequisite for publicatie flows)',
       gekoppeldeWaardelijsten: opts.waardelijstUuids,
-      gekoppeldeGebruikers: [opts.gebruikerId],
+      gekoppeldeGebruikers,
     },
   })
   if (!res.ok())

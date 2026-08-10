@@ -1,7 +1,12 @@
 import { waitForWithReload } from '@/bdd/@gpp-app/support/hydrate'
-import { ENV } from '@/bdd/_core/types'
 import { expect } from '@playwright/test'
 import { Before, Given, test, Then, When } from '../_core/fixture'
+import {
+  burgerportaalBase as burg,
+  openSearchResultsPage,
+  submitHomepageSearch,
+  waitForSearchField,
+} from './support/search'
 
 // Neither SPA (burgerportaal, gpp-app) finishes booting in WebKit on this stack:
 // both serve `Content-Security-Policy: upgrade-insecure-requests`, and WebKit —
@@ -27,7 +32,6 @@ Before({ tags: '@no-webkit' }, async ({ browserName }) => {
  * the homepage counters are not asserted.
  */
 
-const burg = ENV.apps.burgerportaal.replace(/\/$/, '')
 const LIVE = { timeout: 30_000, intervals: [1000, 2000, 3000] }
 
 Given('the burgerportaal homepage is open', async ({ page }) => {
@@ -43,17 +47,25 @@ Given('a promoted, published onderwerp', async ({ topics, scratch }) => {
   await topics.add(undefined, { status: 'gepubliceerd', promoot: true, omschrijving })
 })
 
+// Enough gepromote onderwerpen for carousel nav/pause controls to appear
+// (controls only render when tiles.length > visibleItemsCount, typically 3).
+Given('several promoted, published onderwerpen', async ({ topics, scratch }) => {
+  let lastOmschrijving = ''
+  for (let i = 0; i < 4; i++) {
+    lastOmschrijving = `E2E burger omschrijving ${Date.now()}-${i}`
+    await topics.add(undefined, {
+      status: 'gepubliceerd',
+      promoot: true,
+      omschrijving: lastOmschrijving,
+    })
+  }
+  scratch.set('onderwerp:omschrijving', lastOmschrijving)
+})
+
 // --- Full-text search (experience, not seeded-content indexing) -------------
 
 When('I search the burgerportaal for {string}', async ({ page }, term: string) => {
-  await page.goto(burg)
-  await page.waitForLoadState('networkidle').catch(() => {})
-  // The search field can be late to hydrate on WebKit; reload-retry until it is.
-  const field = page.locator('#search-field')
-  await waitForWithReload(page, field)
-  await field.fill(term)
-  await field.press('Enter')
-  await page.waitForURL(/\/zoeken/, { timeout: 15_000 }).catch(() => {})
+  await submitHomepageSearch(page, term, { via: 'enter' })
 })
 
 Then('I land on the search results page', async ({ page }) => {
@@ -97,222 +109,272 @@ Then('its omschrijving is shown', async ({ page, scratch }) => {
     .toContain(omschrijving)
 })
 
-// --- @todo stubs: gaps vs. manual testscript 11 (bodies not yet implemented) -
-// Registered so bddgen stays green; the @todo Before hook skips the scenarios.
-// Several of the search-result stubs are additionally "skipped by design" (the
-// woo-search Elasticsearch index is not active on the test stack, so a freshly
-// seeded item is never returned as a hit) — they document intended coverage.
-
 // --- Homepage (manual step 1) ----------------------------------------------
 
-Then('the homepage shows counts of onderwerpen, publicaties and documenten', async () => {
-  // Impl: on `page` at `burg`, read the footer info block and assert it shows
-  // numeric counts labelled onderwerpen / publicaties / documenten.
-  throw new Error('TODO: assert the homepage info block shows counts of onderwerpen, publicaties and documenten')
-})
-
-Then('the homepage shows the configured branding', async () => {
-  // Impl: read the beheer config (via the `beheer` fixture) and assert the homepage
-  // renders the configured logo, colours and homepage video.
-  throw new Error('TODO: assert the homepage renders the configured branding (logo, kleuren, video)')
+Then('the homepage shows the configured branding', async ({ page, beheer }) => {
+  const resources = await beheer.getResources()
+  // Logo (SVG inlined into .gpp-woo-logo, or <img>).
+  await expect(page.locator('.gpp-woo-logo')).toBeVisible({ timeout: 20_000 })
+  // Hero sfeerfoto when configured.
+  if (typeof resources.imageUrl === 'string' && resources.imageUrl)
+    await expect(page.locator('.gpp-woo-hero__image')).toBeVisible()
+  // Welcome / branding article when welcome text is set.
+  if (typeof resources.welcomeText === 'string' && resources.welcomeText.trim())
+    await expect(page.locator('article.utrecht-article').first()).toBeVisible()
+  // Promotion video iframe when a video URL is configured.
+  if (typeof resources.videoUrl === 'string' && resources.videoUrl)
+    await expect(page.locator('iframe[title="Uitleg Burgerportaal"]')).toBeVisible()
 })
 
 // --- Full-text search (manual step 2) --------------------------------------
 
-When('I submit an empty burgerportaal search', async () => {
-  // Impl: focus #search-field (leave it empty) and press Enter / click Zoeken, then
-  // waitForURL(/\/zoeken/) on `page`.
-  throw new Error('TODO: submit the burgerportaal search with an empty query')
+When('I submit an empty burgerportaal search', async ({ page }) => {
+  await submitHomepageSearch(page, '', { via: 'enter' })
 })
 
-When('I search the burgerportaal with the boolean query {string}', async ({}, query: string) => {
-  // Impl: fill #search-field with the AND/OR query arg, submit, waitForURL(/\/zoeken/).
-  throw new Error(`TODO: submit the burgerportaal search with a boolean AND/OR query: ${query}`)
+When('I search the burgerportaal with the boolean query {string}', async ({ page }, query: string) => {
+  await submitHomepageSearch(page, query, { via: 'enter' })
 })
 
-When('I search the burgerportaal for the exact phrase {string}', async ({}, phrase: string) => {
-  // Impl: fill #search-field with the phrase arg wrapped in double quotes, submit,
-  // waitForURL(/\/zoeken/).
-  throw new Error(`TODO: submit the burgerportaal search with a quoted exact phrase: ${phrase}`)
+When('I search the burgerportaal for the exact phrase {string}', async ({ page }, phrase: string) => {
+  await submitHomepageSearch(page, `"${phrase}"`, { via: 'enter' })
 })
 
-When('I search the burgerportaal by clicking the Zoeken button', async () => {
-  // Impl: fill #search-field, then click the "Zoeken" submit button (not Enter),
-  // waitForURL(/\/zoeken/).
-  throw new Error('TODO: submit the burgerportaal search by clicking the Zoeken button')
-})
-
-When('I search the burgerportaal for a term in a document\'s contents', async () => {
-  // Impl (skipped by design): search for a term known to live inside a seeded
-  // document's file contents; needs an active Elasticsearch index.
-  throw new Error('TODO: search for a term that only appears in a document\'s file contents')
-})
-
-When('I search the burgerportaal for a term in an onderwerp\'s titel', async () => {
-  // Impl (skipped by design): search for a term from the seeded onderwerp titel;
-  // needs an active Elasticsearch index.
-  throw new Error('TODO: search for a term from a seeded onderwerp\'s titel')
-})
-
-Then('the matching publicatie appears in the search results', async () => {
-  // Impl (skipped by design): assert the seeded publicatie is listed as a hit.
-  throw new Error('TODO: assert the matching publicatie appears among the search results')
-})
-
-Then('the matching onderwerp appears in the search results', async () => {
-  // Impl (skipped by design): assert the seeded onderwerp is listed as a hit.
-  throw new Error('TODO: assert the matching onderwerp appears among the search results')
+When('I search the burgerportaal by clicking the Zoeken button', async ({ page }) => {
+  await submitHomepageSearch(page, 'woo', { via: 'button' })
 })
 
 // --- Navigating the search results (manual step 3) -------------------------
 
-Given('the burgerportaal search results page is open', async () => {
-  // Impl: goto `${burg}/zoeken?...` (or search "woo" from the homepage) on `page` and
-  // wait for the results list to render, so the result-navigation steps have a page.
-  throw new Error('TODO: open the burgerportaal search results page (/zoeken)')
+Given('the burgerportaal search results page is open', async ({ page }) => {
+  await openSearchResultsPage(page, 'woo')
 })
 
-Then('the search results are ordered by relevance by default', async () => {
-  // Impl: assert the sort control defaults to "relevantie" on first load.
-  throw new Error('TODO: assert the search results default to relevance ordering')
+Then('the search results are ordered by relevance by default', async ({ page }) => {
+  // Sort control defaults to Relevantie on `/zoeken` (SearchGrid.vue).
+  await expect(page.getByLabel('Sorteren')).toHaveValue('relevance')
 })
 
-When('I edit the search query on the results page', async () => {
-  // Impl: change the query in the results-page search field and re-submit.
-  throw new Error('TODO: edit the search query on the results page and re-submit')
+When('I edit the search query on the results page', async ({ page, scratch }) => {
+  const edited = `e2e-edited-${Date.now()}`
+  scratch.set('search:editedQuery', edited)
+  const field = await waitForSearchField(page)
+  await field.fill(edited)
+  await field.press('Enter')
+  await page.waitForURL(/query=/, { timeout: 15_000 }).catch(() => {})
 })
 
-Then('the results page reflects the edited query', async () => {
-  // Impl: assert the URL / search field now shows the edited query.
-  throw new Error('TODO: assert the results page reflects the edited search query')
-})
-
-When('I sort the search results chronologically', async () => {
-  // Impl: select the "chronologisch" option in the sort control.
-  throw new Error('TODO: sort the search results chronologically')
-})
-
-Then('the search results are ordered by date', async () => {
-  // Impl: read the result dates and assert they are in chronological order.
-  throw new Error('TODO: assert the search results are ordered by date')
-})
-
-When('I filter the search results by type', async () => {
-  // Impl: tick a "type" facet in the filter sidebar and wait for the list to update.
-  throw new Error('TODO: apply a type filter on the search results')
-})
-
-Then('only search results matching the filter remain', async () => {
-  // Impl: assert every visible result row matches the applied type filter.
-  throw new Error('TODO: assert only results matching the applied filter remain')
-})
-
-When('I activate a search result filter', async () => {
-  // Impl: activate one facet option and capture the other facets' available options.
-  throw new Error('TODO: activate a search result filter facet')
-})
-
-Then('the remaining search filters only offer options that yield results', async () => {
-  // Impl: assert the other facets now only offer options that lead to >=1 result.
-  throw new Error('TODO: assert the remaining filters only offer result-yielding options')
-})
-
-Then('the search results are paginated at ten per page', async () => {
-  // Impl: assert at most 10 results per page and a pager is present when more exist.
-  throw new Error('TODO: assert the search results are paginated at ten per page')
-})
-
-// --- Inspecting a search result (manual step 4) ----------------------------
-
-When('I open a search result', async () => {
-  // Impl (skipped by design): click the first result to open its detail page.
-  throw new Error('TODO: open a search result from the results list')
-})
-
-Then('the opened result shows its metadata', async () => {
-  // Impl (skipped by design): assert the detail page shows the metadata block, with
-  // only fields that have a value.
-  throw new Error('TODO: assert the opened result shows its metadata (only valued fields)')
-})
-
-When('I open a document search result', async () => {
-  // Impl (skipped by design): open a result that is a document.
-  throw new Error('TODO: open a document search result')
-})
-
-Then('the document result offers a download button', async () => {
-  // Impl (skipped by design): assert the document detail page has a download button.
-  throw new Error('TODO: assert the document result offers a download button')
-})
-
-Then('I can navigate from the document to its publicatie', async () => {
-  // Impl (skipped by design): click the linked publicatie at the bottom and assert it opens.
-  throw new Error('TODO: navigate from the document detail to its coupled publicatie')
-})
-
-When('I open a publicatie search result', async () => {
-  // Impl (skipped by design): open a result that is a publicatie.
-  throw new Error('TODO: open a publicatie search result')
-})
-
-Then('the publicatie result lists its coupled documenten', async () => {
-  // Impl (skipped by design): assert the publicatie detail lists its coupled documents.
-  throw new Error('TODO: assert the publicatie result lists its coupled documenten')
+Then('the results page reflects the edited query', async ({ page, scratch }) => {
+  const edited = scratch.get('search:editedQuery')!
+  await expect(page.getByRole('searchbox', { name: 'Zoekterm' })).toHaveValue(edited)
+  expect(decodeURIComponent(page.url())).toContain(edited)
 })
 
 // --- Onderwerp detail page (manual step 4f) --------------------------------
 
-Then('the onderwerp shows an illustration image', async () => {
-  // Impl: on the opened onderwerp detail page, assert an illustration <img> is visible.
-  throw new Error('TODO: assert the opened onderwerp shows an illustration image')
+Then('the onderwerp shows an illustration image', async ({ page, topics }) => {
+  const titel = topics.last()
+  // Spotlight can paint the same afbeelding more than once during layout; any
+  // matching illustration proves the onderwerp shows its image.
+  const img = page.getByRole('img', { name: new RegExp(`Afbeelding\\s+${escapeRegExp(titel)}`) }).first()
+  await expect(img).toBeVisible({ timeout: 20_000 })
 })
 
-Then('the onderwerp metadata is shown', async () => {
-  // Impl: assert the onderwerp detail page renders its metadata block.
-  throw new Error('TODO: assert the opened onderwerp shows its metadata')
+Then('the onderwerp metadata is shown', async ({ page }) => {
+  // OnderwerpDetails.vue renders a metadata table with these kenmerken when valued.
+  // The detail page fetches the onderwerp separately from the list that led here,
+  // and an onderwerp published seconds ago sometimes comes back without its dates
+  // (the rows are skipped when empty) — a reload picks them up.
+  await waitForWithReload(page, page.getByRole('rowheader', { name: 'Gepubliceerd op' }), { timeout: 20_000 })
+  await expect(page.getByRole('rowheader', { name: 'Laatst gewijzigd op' })).toBeVisible()
 })
 
-Then('the onderwerp lists its coupled publicaties', async () => {
-  // Impl: assert the onderwerp detail page lists the coupled publicaties at the bottom.
-  throw new Error('TODO: assert the opened onderwerp lists its coupled publicaties')
-})
-
-Then('I can search and sort the publicaties within the onderwerp', async () => {
-  // Impl: use the onderwerp's publicatie search/sort controls and assert the list updates.
-  throw new Error('TODO: search and sort the publicaties within the onderwerp')
+Then('I can search and sort the publicaties within the onderwerp', async ({ page }) => {
+  // SearchGrid on the onderwerp detail exposes search + sort even when ES is down.
+  await expect(page.getByRole('heading', { name: 'Alle publicaties over dit onderwerp' })).toBeVisible({
+    timeout: 20_000,
+  })
+  const field = page.getByRole('searchbox', { name: 'Zoekterm' })
+  await expect(field).toBeVisible()
+  await field.fill('e2e-onderwerp-zoek')
+  await field.press('Enter')
+  await expect(page).toHaveURL(/query=e2e-onderwerp-zoek/)
+  await page.getByLabel('Sorteren').selectOption({ label: 'Chronologisch' })
+  await expect(page).toHaveURL(/sort=chronological/)
 })
 
 // --- Onderwerpen page (manual step 5) --------------------------------------
 
-Then('each listed onderwerp shows an illustration image', async () => {
-  // Impl: on /onderwerpen, assert each onderwerp card shows an illustration <img>.
-  throw new Error('TODO: assert each onderwerp on the Onderwerpen page shows an illustration image')
+Then('each listed onderwerp shows an illustration image', async ({ page, topics }) => {
+  const titel = topics.last()
+  await expect.poll(async () => {
+    await page.goto(`${burg}/onderwerpen`)
+    await page.waitForLoadState('networkidle').catch(() => {})
+    return page.locator('body').textContent()
+  }, LIVE).toContain(titel)
+  // Seeded onderwerpen always carry an afbeelding (addTopic uploads TOPIC_IMAGE).
+  const img = page.getByRole('img', { name: new RegExp(`Afbeelding\\s+${escapeRegExp(titel)}`) })
+  await expect(img.first()).toBeVisible()
 })
 
-Then('the promoted onderwerpen are shown at the top of the Onderwerpen page', async () => {
-  // Impl: assert the gepromote onderwerpen appear above the full onderwerpen list.
-  throw new Error('TODO: assert promoted onderwerpen are shown at the top of the Onderwerpen page')
+Then('the promoted onderwerpen are shown at the top of the Onderwerpen page', async ({ page, topics }) => {
+  const titel = topics.last()
+  await expect.poll(async () => {
+    await page.goto(`${burg}/onderwerpen`)
+    await page.waitForLoadState('networkidle').catch(() => {})
+    return page.locator('body').textContent()
+  }, LIVE).toContain(titel)
+  const gepromoot = page.getByRole('heading', { name: 'Gepromoot', level: 2 })
+  await expect(gepromoot).toBeVisible()
+  const alle = page.getByRole('heading', { name: /Alle onderwerpen/, level: 2 })
+  await expect(alle).toBeVisible()
+  // Gepromoot section precedes the full list in document order.
+  const gepromootBox = await gepromoot.boundingBox()
+  const alleBox = await alle.boundingBox()
+  expect(gepromootBox && alleBox && gepromootBox.y < alleBox.y).toBeTruthy()
+  await expect(page.getByRole('list').or(page.locator('main')).getByText(titel).first()).toBeVisible()
 })
 
 // --- Homepage promoted-onderwerpen carousel (manual step 5) ----------------
 
-Then('the homepage carousel shows at most three promoted onderwerpen', async () => {
-  // Impl: on the homepage, assert the carousel shows only gepromote onderwerpen and
-  // at most three at a time.
-  throw new Error('TODO: assert the homepage carousel shows at most three promoted onderwerpen')
+Then('the homepage carousel shows at most three promoted onderwerpen', async ({ page, topics }) => {
+  const titel = topics.last()
+  await expect.poll(async () => {
+    await page.goto(burg)
+    await page.waitForLoadState('networkidle').catch(() => {})
+    return page.locator('body').textContent()
+  }, LIVE).toContain(titel)
+
+  const carousel = page.getByRole('list', { name: 'Tegel carrousel' })
+  await expect(carousel).toBeVisible()
+  const visibleCount = await carousel.locator('li').evaluateAll(
+    els => els.filter(el => el.getAttribute('aria-hidden') !== 'true').length,
+  )
+  expect(visibleCount).toBeGreaterThan(0)
+  expect(visibleCount).toBeLessThanOrEqual(3)
 })
 
-When('I pause the homepage onderwerpen carousel', async () => {
-  // Impl: click the carousel pause control on the homepage.
-  throw new Error('TODO: pause the homepage onderwerpen carousel')
+When('I pause the homepage onderwerpen carousel', async ({ page, topics }) => {
+  const titel = topics.last()
+  await expect.poll(async () => {
+    await page.goto(burg)
+    await page.waitForLoadState('networkidle').catch(() => {})
+    return page.locator('body').textContent()
+  }, LIVE).toContain(titel)
+
+  const pause = page.getByRole('button', { name: 'Pauzeren' })
+  await expect(pause).toBeVisible({ timeout: 20_000 })
+  await pause.click()
+  await expect(page.getByRole('button', { name: 'Starten' })).toBeVisible()
 })
 
-Then('I can browse the carousel onderwerpen manually', async () => {
-  // Impl: click the next/prev carousel controls and assert the shown onderwerp changes.
-  throw new Error('TODO: browse the homepage carousel onderwerpen manually via the controls')
+Then('I can browse the carousel onderwerpen manually', async ({ page }) => {
+  const live = page.getByText(/Tegel \d+ van \d+/)
+  const before = (await live.textContent())?.trim() ?? ''
+  await page.getByRole('button', { name: 'Volgend item' }).click()
+  await expect.poll(async () => (await live.textContent())?.trim() ?? '').not.toBe(before)
 })
 
-When('I open a promoted onderwerp from the homepage carousel', async () => {
-  // Impl: click the seeded onderwerp inside the homepage carousel to open its detail page.
-  throw new Error('TODO: open a promoted onderwerp from the homepage carousel')
+When('I open a promoted onderwerp from the homepage carousel', async ({ page, topics }) => {
+  const titel = topics.last()
+  await expect.poll(async () => {
+    await page.goto(burg)
+    await page.waitForLoadState('networkidle').catch(() => {})
+    return page.locator('body').textContent()
+  }, LIVE).toContain(titel)
+
+  const carousel = page.getByRole('list', { name: 'Tegel carrousel' })
+  await expect(carousel).toBeVisible({ timeout: 20_000 })
+  // Tile title is a link; when off-screen (aria-hidden) it is not tabbable — click via text.
+  await carousel.getByRole('link', { name: titel }).click()
+  await page.waitForLoadState('networkidle').catch(() => {})
+  await expect(page).toHaveURL(/\/onderwerpen\//)
 })
+
+// --- @blocked stubs (bddgen registration only; Before(@blocked) skips) ------
+// Bodies intentionally throw — the @blocked hook skips before they run. Kept so
+// removing the tag later fails loudly until a real implementation lands.
+
+Then('the homepage shows counts of onderwerpen, publicaties and documenten', async () => {
+  throw new Error('BLOCKED: homepage counts require woo-search ES facets (POST /api/zoeken)')
+})
+
+When('I search the burgerportaal for a term in a document\'s contents', async () => {
+  throw new Error('BLOCKED: document-content search requires an active Elasticsearch index')
+})
+
+When('I search the burgerportaal for a term in an onderwerp\'s titel', async () => {
+  throw new Error('BLOCKED: onderwerp-titel search requires an active Elasticsearch index')
+})
+
+Then('the matching publicatie appears in the search results', async () => {
+  throw new Error('BLOCKED: asserting a search hit requires an active Elasticsearch index')
+})
+
+Then('the matching onderwerp appears in the search results', async () => {
+  throw new Error('BLOCKED: asserting a search hit requires an active Elasticsearch index')
+})
+
+When('I sort the search results chronologically', async () => {
+  throw new Error('BLOCKED: chronological result order requires indexed search hits')
+})
+
+Then('the search results are ordered by date', async () => {
+  throw new Error('BLOCKED: chronological result order requires indexed search hits')
+})
+
+When('I filter the search results by type', async () => {
+  throw new Error('BLOCKED: type facets require woo-search ES facet buckets')
+})
+
+Then('only search results matching the filter remain', async () => {
+  throw new Error('BLOCKED: filter assertions require woo-search ES facet buckets')
+})
+
+When('I activate a search result filter', async () => {
+  throw new Error('BLOCKED: cascading filter options require woo-search ES facet buckets')
+})
+
+Then('the remaining search filters only offer options that yield results', async () => {
+  throw new Error('BLOCKED: cascading filter options require woo-search ES facet buckets')
+})
+
+Then('the search results are paginated at ten per page', async () => {
+  throw new Error('BLOCKED: pagination UI only appears when ES returns count > page size')
+})
+
+When('I open a search result', async () => {
+  throw new Error('BLOCKED: opening a search result requires an indexed hit')
+})
+
+Then('the opened result shows its metadata', async () => {
+  throw new Error('BLOCKED: result metadata requires an indexed hit')
+})
+
+When('I open a document search result', async () => {
+  throw new Error('BLOCKED: document search results require an indexed document hit')
+})
+
+Then('the document result offers a download button', async () => {
+  throw new Error('BLOCKED: document download requires an indexed document hit')
+})
+
+Then('I can navigate from the document to its publicatie', async () => {
+  throw new Error('BLOCKED: document→publicatie navigation requires an indexed document hit')
+})
+
+When('I open a publicatie search result', async () => {
+  throw new Error('BLOCKED: publicatie search results require an indexed publicatie hit')
+})
+
+Then('the publicatie result lists its coupled documenten', async () => {
+  throw new Error('BLOCKED: coupled documenten require an indexed publicatie hit')
+})
+
+Then('the onderwerp lists its coupled publicaties', async () => {
+  throw new Error('BLOCKED: onderwerp publicatie list uses SearchGrid → POST /api/zoeken (ES)')
+})
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
