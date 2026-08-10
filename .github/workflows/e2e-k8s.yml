@@ -86,6 +86,16 @@ jobs:
         working-directory: charts
         run: USE_EXISTING_CLUSTER=1 bash hack/up.sh
 
+      # The charts do not wire the Documenten API (no DRC Service, no
+      # GlobalConfiguration.documents_api_service, and OpenZaak has no ORC service
+      # for the publicatiebank catalogi), so POST /api/v2/documenten answers 500 and
+      # every scenario that seeds a document fails. This is the same once-per-fresh-
+      # stack step the README documents for a local bring-up. It also sets the
+      # publication URL templates, which ship empty (see the script's header).
+      - name: Provision the Documenten API on the stack
+        working-directory: e2e-tests
+        run: ./setup/provision-documenten-api.sh
+
       - uses: actions/setup-node@v4
         with: {node-version: lts/*}
       - name: Install e2e deps
