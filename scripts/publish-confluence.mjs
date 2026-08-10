@@ -107,6 +107,24 @@ function bindOutline(gherkin, outlineName, exampleTitle) {
   return out
 }
 
+/** Unique `test.skip(reason)` / `test.fix(reason)` descriptions from skipped runs. */
+function skipReason(tests) {
+  const reasons = []
+  for (const t of tests) {
+    if (t.status !== 'skipped')
+      continue
+    const anns = [
+      ...(t.annotations ?? []),
+      ...(t.results ?? []).flatMap(r => r.annotations ?? []),
+    ]
+    for (const a of anns) {
+      if ((a.type === 'skip' || a.type === 'fix') && a.description)
+        reasons.push(a.description)
+    }
+  }
+  return [...new Set(reasons)].join('; ')
+}
+
 /**
  * Flatten the nested suites tree into one row per scenario (a `spec`), with the
  * status aggregated over its per-browser runs (a `test` per Playwright project).
@@ -127,6 +145,7 @@ export function scenarios(report) {
         id: spec.id,
         status,
         note: mixed ? tests.filter(t => t.status === status).map(t => t.projectName).join(', ') : '',
+        reason: status === 'skipped' ? skipReason(tests) : '',
       })
     }
     for (const child of suite.suites ?? []) walk(child, [...path, child.title])
@@ -173,6 +192,7 @@ export function storageBody(report, links, gherkin = new Map()) {
 
   const row = (x) => {
     const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}`
+      + (x.reason ? `<br/>${esc(x.reason)}` : '')
     const meta = `${status}<br/><br/>${testLink(reportUrl, x, 'report')}<br/><br/>${esc(x.title)}`
     return `<tr><td>${meta}</td><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario, x.title))}</td></tr>`
   }
@@ -259,13 +279,25 @@ if (process.argv[2] === '--selfcheck') {
         specs: [
           // fails in webkit only -> worst-wins + the browser gets named
           { title: 'b<ad>', id: 'idbad', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }, { status: 'unexpected', projectName: 'webkit' }] },
-          { title: 'todo', id: 'idtodo', file: 'a.feature.spec.js', tests: [{ status: 'skipped', projectName: 'chromium' }] },
+          {
+            title: 'todo',
+            id: 'idtodo',
+            file: 'a.feature.spec.js',
+            tests: [{
+              status: 'skipped',
+              projectName: 'chromium',
+              annotations: [{ type: 'skip', description: 'TODO: step implementation pending (@todo)' }],
+            }],
+          },
         ],
       }],
     }],
   }
   assert.deepEqual(failures(r), ['a.feature.spec.js › Feature: grp › b<ad>'])
-  assert.deepEqual(scenarios(r).map(s => `${s.status}:${s.note}`), ['expected:', 'unexpected:webkit', 'skipped:'])
+  assert.deepEqual(
+    scenarios(r).map(s => `${s.status}:${s.note}:${s.reason}`),
+    ['expected::', 'unexpected:webkit:', 'skipped::TODO: step implementation pending (@todo)'],
+  )
 
   // The real index is built from disk; this repo's own features must parse.
   const real = gherkinIndex('bdd')
@@ -281,7 +313,9 @@ if (process.argv[2] === '--selfcheck') {
   assert.match(html, /<th>Test<\/th><th>Gherkin<\/th><\/tr>/)
   // status, blank line, report link, blank line, path — then Gherkin in column 2
   assert.match(html, /<td>⛔ - failed \(webkit\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
-  assert.match(html, /⏭️ - skipped<br\/><br\/>.*<\/td><td><\/td>/) // no gherkin source -> empty cell, row still rendered
+  // skip reason sits under the status; no gherkin source -> empty cell, row still rendered
+  assert.match(html, /⏭️ - skipped<br\/>TODO: step implementation pending \(@todo\)<br\/><br\/>/)
+  assert.match(html, /idtodo">report<\/a><br\/><br\/>Feature: grp › todo<\/td><td><\/td>/)
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
 
   // Scenario Outline: leaf title has values; outline name lives on the parent suite.
