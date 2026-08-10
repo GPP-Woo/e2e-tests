@@ -63,14 +63,48 @@ export function gherkinIndex(root = 'bdd') {
   return out
 }
 
-/** `@a/b.feature.spec.js` + scenario title -> the Gherkin source of that scenario. */
-function gherkinFor(index, file, title) {
-  const key = `${file.replace(/\.spec\.js$/, '')}::${title}`
-  if (index.has(key))
-    return index.get(key)
-  // Scenario Outline examples get the parameters appended to the title.
-  const prefix = `${key.split('::')[0]}::`
-  return [...index].find(([k]) => k.startsWith(prefix) && title.startsWith(k.slice(prefix.length)))?.[1] ?? ''
+/** Turn `Edit the <field> of X` into a regex that matches `Edit the foo of X`. */
+function outlinePattern(name) {
+  return new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[^>]+>/g, '(.+)')}$`)
+}
+
+/**
+ * `@a/b.feature.spec.js` + scenario title -> the Gherkin source of that scenario.
+ * playwright-bdd puts Scenario Outline names on a parent suite and substitutes
+ * example values into the leaf title (`Edit the <field>…` → `Edit the foo…`),
+ * so we also try path segments and placeholder patterns.
+ */
+function gherkinFor(index, file, title, fullTitle = title) {
+  const fileKey = file.replace(/\.spec\.js$/, '')
+  const names = [title, ...fullTitle.split(' › ')].filter(Boolean)
+  for (const name of names) {
+    const hit = index.get(`${fileKey}::${name}`)
+    if (hit)
+      return bindOutline(hit, name, title)
+  }
+  for (const [k, v] of index) {
+    if (!k.startsWith(`${fileKey}::`) || !k.includes('<'))
+      continue
+    const outlineName = k.slice(fileKey.length + 2)
+    if (outlinePattern(outlineName).test(title))
+      return bindOutline(v, outlineName, title)
+  }
+  return ''
+}
+
+/** Fill `<param>` placeholders in outline Gherkin from the example title. */
+function bindOutline(gherkin, outlineName, exampleTitle) {
+  const params = [...outlineName.matchAll(/<([^>]+)>/g)].map(m => m[1])
+  if (!params.length)
+    return gherkin
+  const m = exampleTitle.match(outlinePattern(outlineName))
+  if (!m)
+    return gherkin
+  let out = gherkin.replace(/^Scenario Outline:/, 'Scenario:')
+  params.forEach((p, i) => {
+    out = out.replaceAll(`<${p}>`, m[i + 1])
+  })
+  return out
 }
 
 /**
@@ -139,9 +173,8 @@ export function storageBody(report, links, gherkin = new Map()) {
 
   const row = (x) => {
     const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}`
-      + `<br/>${testLink(reportUrl, x, 'report')}`
-    return `<tr><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario))}</td><td>${status}</td>`
-      + `<td>${esc(x.title)}</td></tr>`
+    const meta = `${status}<br/><br/>${testLink(reportUrl, x, 'report')}<br/><br/>${esc(x.title)}`
+    return `<tr><td>${meta}</td><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario, x.title))}</td></tr>`
   }
 
   return [
@@ -159,7 +192,7 @@ export function storageBody(report, links, gherkin = new Map()) {
       `<h3>${esc(file)}</h3>`,
       // full-width breaks the table out of the page's fixed content column
       '<table data-layout="full-width"><tbody>',
-      '<tr><th>Gherkin</th><th>Status</th><th>Path</th></tr>',
+      '<tr><th>Test</th><th>Gherkin</th></tr>',
       ...list.map(row),
       '</tbody></table>',
     ]),
@@ -245,13 +278,32 @@ if (process.argv[2] === '--selfcheck') {
   const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' }, gk)
   assert.match(html, /❌ FAILED/)
   assert.match(html, /<table data-layout="full-width">/) // tables span the full page width
-  assert.match(html, /<th>Gherkin<\/th><th>Status<\/th><th>Path<\/th><\/tr>/)
-  assert.match(html, /<td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/) // gherkin, escaped, newlines kept
-  // icon - state (browser), report link on the next line
-  assert.match(html, /<td>⛔ - failed \(webkit\)<br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><\/td>/)
-  assert.match(html, /<td>Feature: grp › b&lt;ad&gt;<\/td>/) // path column
-  assert.match(html, /<td><\/td><td>⏭️ - skipped<br\//) // no gherkin source -> empty cell, row still rendered
+  assert.match(html, /<th>Test<\/th><th>Gherkin<\/th><\/tr>/)
+  // status, blank line, report link, blank line, path — then Gherkin in column 2
+  assert.match(html, /<td>⛔ - failed \(webkit\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
+  assert.match(html, /⏭️ - skipped<br\/><br\/>.*<\/td><td><\/td>/) // no gherkin source -> empty cell, row still rendered
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
+
+  // Scenario Outline: leaf title has values; outline name lives on the parent suite.
+  const outline = new Map([['o.feature::Edit the <field> of X', 'Scenario Outline: Edit the <field> of X\n  When I change "<field>"']])
+  const or = {
+    stats: { expected: 1, unexpected: 0, flaky: 0, skipped: 0, duration: 1, startTime: 'T' },
+    suites: [{
+      title: 'o.feature.spec.js',
+      suites: [{
+        title: 'Edit the <field> of X',
+        specs: [{
+          title: 'Edit the foo of X',
+          id: 'ido',
+          file: 'o.feature.spec.js',
+          tests: [{ status: 'expected', projectName: 'chromium' }],
+        }],
+      }],
+    }],
+  }
+  const oh = storageBody(or, { 'HTML report': 'https://o/' }, outline)
+  assert.match(oh, /Scenario: Edit the foo of X<br\/> {2}When I change &quot;foo&quot;/) // placeholders bound, escaped
+
   assert.deepEqual(failures({}), [])
   assert.equal(gherkinIndex('does-not-exist').size, 0) // missing sources must not crash the publish
   const none = storageBody(null, { 'CI run': 'http://x', 'HTML report': '' })
