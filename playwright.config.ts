@@ -54,7 +54,12 @@ export default defineConfig({
      alone pushed the k8s run past its job timeout without catching anything a
      single retry doesn't. */
   retries: 1,
-  /* Opt out of parallel tests on CI.
+  /* CI runs 2 workers, not 1: the suite was 39 min of a 54 min job at one
+     worker, and `ubuntu-latest` has 4 vCPU / 16 GB — the kind stack sits at
+     roughly half of that, so there is room for a second browser. If the backend
+     starts starving, it shows up as the symptoms described below (502s on
+     documenten, exit 137, beforeEach timeouts that pass in isolation); drop
+     back to 1 rather than chasing them.
 
      Locally, cap instead of letting Playwright pick one worker per core. The
      whole stack (Elasticsearch + Keycloak + four Django/dotnet apps) shares one
@@ -65,7 +70,7 @@ export default defineConfig({
      which passes in isolation, so they read as flakes rather than as a starved
      backend. 4 is safe on an 8 GB VM; raise it only alongside the VM's memory
      (`docker info --format '{{.MemTotal}}'`). */
-  workers: process.env.CI ? 1 : 4,
+  workers: process.env.CI ? 2 : 4,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI
     ? [['html'], ['github'], ['dot'], ['json', { outputFile: 'playwright-report/results.json' }]]

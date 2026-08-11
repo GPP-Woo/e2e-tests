@@ -39,6 +39,13 @@ so the skips stay visible in the report rather than silently passing. SPA nav
 that is merely slow to hydrate on non-chromium engines is handled by
 `bdd/@gpp-app/support/hydrate.ts` (`waitForWithReload`, a reload-retry).
 
+**In CI, pull requests run chromium only** — firefox and webkit are 138 of the
+310 tests, and they catch engine differences, which move on the browsers'
+release schedule and not on a PR. All three run nightly (`e2e-k8s.yml`, 02:00
+UTC) and on a `workflow_dispatch` with `browsers: all`. The run summary always
+names the browsers it covered and marks the others `➖ not run`, so a
+chromium-only run can never be mistaken for a green cross-browser one.
+
 ## Requirements to run
 
 Setup and teardown use **only the UI and API** so the suite runs against any

@@ -3,7 +3,19 @@ name: E2E on local k8s
 # used locally) and runs the Playwright suite against it. Validates the real charts on every PR.
 on:
   pull_request:
+  # Nightly full-matrix run. PRs run chromium only (see BROWSERS below): firefox
+  # and webkit are 138 of the 310 tests and exist to catch engine differences,
+  # which change on the browsers' release cadence, not on a PR. Once a night is
+  # the right frequency for that; twice per PR is not.
+  schedule:
+    - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      browsers:
+        description: Browsers to run
+        type: choice
+        options: [all, chromium]
+        default: all
 
 # `pages: write` + `id-token: write` are needed by the deploy job below. Fork PRs
 # get a read-only token regardless, but the deploy is gated off for PRs anyway.
@@ -29,6 +41,9 @@ jobs:
       # Single source of truth: keep in sync with the Helm used locally for
       # hack/up.sh (needs Helm 4 for `--server-side --force-conflicts`).
       HELM_VERSION: v4.2.3
+      # `all` -> every project in playwright.config.ts; `chromium` -> just that
+      # one (Playwright pulls in its `setup` dependency by itself).
+      BROWSERS: ${{ inputs.browsers || (github.event_name == 'pull_request' && 'chromium' || 'all') }}
     steps:
       - uses: actions/checkout@v4
         with: {path: e2e-tests}
@@ -82,9 +97,49 @@ jobs:
       - name: Raise vm.max_map_count for Elasticsearch (ECK)
         run: sudo sysctl -w vm.max_map_count=262144
 
+      # Building the five app images from source is ~8 of the ~10 min up.sh takes,
+      # and the app repos are pinned refs that rarely move. Key the cache on their
+      # resolved HEADs (which cover their Dockerfiles too) plus up.sh itself —
+      # that script holds the build commands and the OPENZAAK_VERSION default, so
+      # hashing it is what keeps an openzaak bump from restoring a stale image.
+      - name: Compute image cache key
+        id: imgkey
+        run: |
+          key=$({ for d in GPP-app GPP-burgerportaal GPP-publicatiebank GPP-zoeken; do
+                    git -C "$d" rev-parse HEAD
+                  done
+                  sha256sum charts/hack/up.sh; } | sha256sum | cut -c1-16)
+          echo "key=gpp-images-v1-$key" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: image-cache
+        with:
+          path: /tmp/gpp-images.tar
+          key: ${{ steps.imgkey.outputs.key }}
+      - name: Load cached images
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/gpp-images.tar
+
       - name: Bring up the GPP stack from charts
+        id: up
         working-directory: charts
+        env:
+          # up.sh reuses whatever *:local images are already in the daemon.
+          SKIP_BUILD: ${{ steps.image-cache.outputs.cache-hit == 'true' && '1' || '' }}
         run: USE_EXISTING_CLUSTER=1 bash hack/up.sh
+
+      # Only on a clean bring-up: a tar written from a half-built stack would be
+      # restored next run under SKIP_BUILD=1 and fail with no build to fix it.
+      # actions/cache's post-job step uploads the file, so writing it here is enough.
+      - name: Stage images for the cache
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' && steps.up.outcome == 'success' }}
+        # Write to a temp name and rename: actions/cache uploads whatever is at
+        # the path in the post-job step, so a save killed halfway would otherwise
+        # cache a truncated tar under a key that looks valid forever.
+        run: |
+          docker save -o /tmp/gpp-images.tar.part \
+            odpc:local odbp:local gpp-publicatiebank:local gpp-zoeken:local openzaak:local
+          mv /tmp/gpp-images.tar.part /tmp/gpp-images.tar
+          ls -lh /tmp/gpp-images.tar; df -h /
 
       # The charts do not wire the Documenten API (no DRC Service, no
       # GlobalConfiguration.documents_api_service, and OpenZaak has no ORC service
@@ -131,7 +186,16 @@ jobs:
           DRC_ROOT: http://localhost:8001/documenten/api/v1/
           OPENZAAK_CLIENT_ID: woo-publications-dev
           OPENZAAK_SECRET: insecure-yQL9Rzh4eHGVmYx5w3J2gu
-        run: npm test
+        # `setup` is named explicitly rather than left to chromium's `dependencies`:
+        # Playwright does run dependencies of a --project selection, but if that
+        # ever changes the failure mode is every scenario failing on a missing
+        # .auth/*.json, which is a miserable thing to debug for one saved flag.
+        run: |
+          if [ "$BROWSERS" = all ]; then
+            npm test
+          else
+            npm test -- --project=setup --project=chromium
+          fi
 
       - name: Dump cluster state on failure
         # cancelled() too: a timeout-cancel is the case where a wedged pod is the

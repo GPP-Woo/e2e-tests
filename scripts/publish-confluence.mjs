@@ -17,9 +17,23 @@ import { IdGenerator } from '@cucumber/messages'
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const nl2br = s => esc(s).replace(/\n/g, '<br/>')
 
-const ICON = { expected: '✅', unexpected: '⛔', flaky: '⚠️', skipped: '⏭️' }
-const LABEL = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', skipped: 'skipped' }
+const ICON = { expected: '✅', unexpected: '⛔', flaky: '⚠️', skipped: '⏭️', notrun: '➖' }
+const LABEL = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', skipped: 'skipped', notrun: 'not run' }
+
+/**
+ * One glyph per browser, so the per-browser breakdown fits inside the status
+ * cell instead of costing a table column each. 🦊 firefox and 🧭 webkit (Safari's
+ * own icon is a compass) are self-evident; chromium has no obvious emoji, so 🔵
+ * stands in for Chrome's blue-centred circle. An unknown project falls back to
+ * its name — wrong-but-readable beats a second project silently sharing a glyph.
+ */
+const BROWSER = { chromium: '🔵', firefox: '🦊', webkit: '🧭' }
+const glyph = p => BROWSER[p] ?? esc(p)
+// Between browser/status pairs. The pair itself is unseparated: `🦊✅` reads as
+// one token, where `🦊-✅` reads as three and the row turns into punctuation.
+const PAIR_SEP = ' · '
 // Worst-wins: a scenario that fails in one browser is a failing scenario.
+// `notrun` is not a result, so it never wins — see browserCells.
 const RANK = { skipped: 0, expected: 1, flaky: 2, unexpected: 3 }
 
 const steps = s => [`${s.keyword.trim()}:${s.name ? ` ${s.name}` : ''}`, ...s.steps.map(st => `  ${st.keyword}${st.text}`)]
@@ -107,45 +121,69 @@ function bindOutline(gherkin, outlineName, exampleTitle) {
   return out
 }
 
-/** Unique `test.skip(reason)` / `test.fix(reason)` descriptions from skipped runs. */
-function skipReason(tests) {
-  const reasons = []
-  for (const t of tests) {
-    if (t.status !== 'skipped')
-      continue
-    const anns = [
-      ...(t.annotations ?? []),
-      ...(t.results ?? []).flatMap(r => r.annotations ?? []),
-    ]
-    for (const a of anns) {
-      if ((a.type === 'skip' || a.type === 'fix') && a.description)
-        reasons.push(a.description)
-    }
-  }
+/** `test.skip(reason)` / `test.fix(reason)` descriptions on one browser's run. */
+function skipReason(test) {
+  const anns = [...(test.annotations ?? []), ...(test.results ?? []).flatMap(r => r.annotations ?? [])]
+  const reasons = anns.filter(a => (a.type === 'skip' || a.type === 'fix') && a.description).map(a => a.description)
   return [...new Set(reasons)].join('; ')
 }
 
 /**
- * Flatten the nested suites tree into one row per scenario (a `spec`), with the
- * status aggregated over its per-browser runs (a `test` per Playwright project).
+ * Every Playwright project that produced a result anywhere in the run, in the
+ * order first seen. Taken from the results rather than from `config.projects`
+ * so a `--project=chromium` run reports one browser instead of three columns of
+ * "not run" — the list is "what this run covered", not "what the config knows".
  */
-export function scenarios(report) {
+export function projectsIn(report) {
+  const seen = new Set()
+  const walk = (suite) => {
+    for (const spec of suite.specs ?? []) {
+      for (const t of spec.tests ?? []) {
+        if (t.projectName)
+          seen.add(t.projectName)
+      }
+    }
+    for (const child of suite.suites ?? []) walk(child)
+  }
+  for (const s of report.suites ?? []) walk(s)
+  return [...seen]
+}
+
+/**
+ * Flatten the nested suites tree into one row per scenario (a `spec`).
+ *
+ * A `spec` is the scenario; each `test` under it is that scenario on one browser
+ * project. So the run's headline test count is scenarios × browsers, not
+ * scenarios — hence `browsers`, which carries the per-project outcome, and
+ * `status`, the worst of them (one red browser makes the scenario red).
+ *
+ * A browser missing from `spec.tests` was filtered out before the run — by
+ * `grepInvert` on the project (@chromium-only, @no-webkit) or by `--project` on
+ * the command line — and is reported as `notrun`, not as a pass or a skip.
+ */
+export function scenarios(report, projects = projectsIn(report)) {
   const out = []
   const walk = (suite, path) => {
     for (const spec of suite.specs ?? []) {
       const tests = spec.tests ?? []
+      const byProject = new Map(tests.map(t => [t.projectName, t]))
+      const browsers = projects.map((project) => {
+        const t = byProject.get(project)
+        return {
+          project,
+          status: t ? t.status : 'notrun',
+          reason: t && t.status === 'skipped' ? skipReason(t) : '',
+        }
+      })
       const status = tests.reduce((worst, t) => RANK[t.status] > RANK[worst] ? t.status : worst, 'skipped')
-      // 3 browsers × ~300 scenarios is unreadable, so only name the browsers
-      // when they disagree — that is the only case where the detail matters.
-      const mixed = tests.some(t => t.status !== status)
       out.push({
         file: spec.file,
         scenario: spec.title,
         title: [...path, spec.title].join(' › '),
         id: spec.id,
         status,
-        note: mixed ? tests.filter(t => t.status === status).map(t => t.projectName).join(', ') : '',
-        reason: status === 'skipped' ? skipReason(tests) : '',
+        browsers,
+        reason: [...new Set(browsers.map(b => b.reason).filter(Boolean))].join('; '),
       })
     }
     for (const child of suite.suites ?? []) walk(child, [...path, child.title])
@@ -175,15 +213,24 @@ export function storageBody(report, links, gherkin = new Map()) {
     return [`<p><strong>⚠️ NO RESULTS</strong> — the run failed before the tests produced a report.</p>`, ...linkList].join('\n')
 
   const s = report.stats ?? {}
+  const projects = projectsIn(report)
+  const all = scenarios(report, projects)
+  // Playwright's stats count *test runs* — one scenario per browser. Reporting
+  // that number as "tests" overstates the suite by ~2x, so show both: how many
+  // scenarios exist, and how many times they were run.
+  const tally = list => Object.entries(ICON)
+    .map(([k, icon]) => [icon, list.filter(x => x === k).length])
+    .filter(([, n]) => n > 0)
+    .map(([icon, n]) => `${icon} ${n}`)
+    .join('  ')
+  const runs = all.flatMap(x => x.browsers.map(b => b.status)).filter(x => x !== 'notrun')
   const rows = [
-    ['Passed', s.expected ?? 0],
-    ['Failed', s.unexpected ?? 0],
-    ['Flaky', s.flaky ?? 0],
-    ['Skipped', s.skipped ?? 0],
+    ['Browsers', projects.join(' · ') || '—'],
+    ['Scenarios', `${all.length}   ${tally(all.map(x => x.status))}`],
+    ['Test runs (scenario × browser)', `${runs.length}   ${tally(runs)}`],
     ['Duration', `${Math.round((s.duration ?? 0) / 1000)}s`],
     ['Started', s.startTime ?? ''],
   ]
-  const all = scenarios(report)
   const failed = all.filter(x => x.status === 'unexpected')
   const reportUrl = links['HTML report']
 
@@ -191,8 +238,17 @@ export function storageBody(report, links, gherkin = new Map()) {
   for (const x of all) byFile.set(x.file, [...(byFile.get(x.file) ?? []), x])
 
   const row = (x) => {
-    const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${x.note ? ` (${esc(x.note)})` : ''}${
-      x.reason ? `<br/>${esc(x.reason)}` : ''}`
+    // Worst-wins status, then the same result broken down per browser. Dropped
+    // when only one browser ran: `passed (🔵✅)` is the header line again.
+    const breakdown = projects.length > 1
+      ? ` (${x.browsers.map(b => `${glyph(b.project)}${ICON[b.status]}`).join(PAIR_SEP)})`
+      : ''
+    // A skip reason belongs to the browser that skipped, so it keeps its glyph.
+    const reasons = x.browsers
+      .filter(b => b.reason)
+      .map(b => `<br/>${glyph(b.project)} ${esc(b.reason)}`)
+      .join('')
+    const status = `${ICON[x.status]} - ${esc(LABEL[x.status])}${breakdown}${reasons}`
     const meta = `${status}<br/><br/>${testLink(reportUrl, x, 'report')}<br/><br/>${esc(x.title)}`
     return `<tr><td>${meta}</td><td>${nl2br(gherkinFor(gherkin, x.file, x.scenario, x.title))}</td></tr>`
   }
@@ -207,7 +263,12 @@ export function storageBody(report, links, gherkin = new Map()) {
       ? `<h2>Failed scenarios</h2><ul>${failed.map(x => `<li>⛔ ${testLink(reportUrl, x, x.title)} <em>${esc(x.file)}</em></li>`).join('')}</ul>`
       : '',
     '<h2>All scenarios</h2>',
-    `<p>${esc(`${ICON.expected} passed · ${ICON.unexpected} failed · ${ICON.flaky} flaky · ${ICON.skipped} skipped (@todo or browser-excluded)`)}</p>`,
+    `<p>${esc(`${ICON.expected} passed · ${ICON.unexpected} failed · ${ICON.flaky} flaky · `
+      + `${ICON.skipped} skipped (@todo, or skipped at runtime) · `
+      + `${ICON.notrun} not run in this browser (excluded by tag, or the run was scoped to one browser)`)}</p>`,
+    projects.length > 1
+      ? `<p>${esc(`Breakdown after the status is per browser: ${projects.map(p => `${glyph(p)} ${p}`).join(' · ')}`)}</p>`
+      : '',
     ...[...byFile].flatMap(([file, list]) => [
       `<h3>${esc(file)}</h3>`,
       // full-width breaks the table out of the page's fixed content column
@@ -277,7 +338,7 @@ if (process.argv[2] === '--selfcheck') {
       suites: [{
         title: 'Feature: grp',
         specs: [
-          // fails in webkit only -> worst-wins + the browser gets named
+          // fails in webkit only -> worst-wins overall, both browsers shown
           { title: 'b<ad>', id: 'idbad', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }, { status: 'unexpected', projectName: 'webkit' }] },
           {
             title: 'todo',
@@ -294,10 +355,25 @@ if (process.argv[2] === '--selfcheck') {
     }],
   }
   assert.deepEqual(failures(r), ['a.feature.spec.js › Feature: grp › b<ad>'])
+  // Browser columns come from the results, in first-seen order.
+  assert.deepEqual(projectsIn(r), ['chromium', 'webkit'])
   assert.deepEqual(
-    scenarios(r).map(s => `${s.status}:${s.note}:${s.reason}`),
-    ['expected::', 'unexpected:webkit:', 'skipped::TODO: step implementation pending (@todo)'],
+    scenarios(r).map(s => `${s.status}:${s.reason}`),
+    ['expected:', 'unexpected:', 'skipped:TODO: step implementation pending (@todo)'],
   )
+  // Per browser: a spec with no webkit `test` was filtered out before the run,
+  // which is `notrun` — not a pass, and not a skip either.
+  assert.deepEqual(
+    scenarios(r).map(s => s.browsers.map(b => `${b.project}=${b.status}`).join(',')),
+    ['chromium=expected,webkit=notrun', 'chromium=expected,webkit=unexpected', 'chromium=skipped,webkit=notrun'],
+  )
+  // The skip reason sits on the browser that skipped, not on the whole scenario.
+  assert.deepEqual(
+    scenarios(r)[2].browsers.map(b => b.reason),
+    ['TODO: step implementation pending (@todo)', ''],
+  )
+  // A single-browser run reports one column, not three "not run" ones.
+  assert.deepEqual(projectsIn({ suites: [{ specs: [{ tests: [{ status: 'expected', projectName: 'chromium' }] }] }] }), ['chromium'])
 
   // The real index is built from disk; this repo's own features must parse.
   const real = gherkinIndex('bdd')
@@ -310,11 +386,18 @@ if (process.argv[2] === '--selfcheck') {
   const html = storageBody(r, { 'CI run': 'http://x', 'HTML report': 'https://o.github.io/e2e/' }, gk)
   assert.match(html, /❌ FAILED/)
   assert.match(html, /<table data-layout="full-width">/) // tables span the full page width
+  // Two columns — the browsers live inside the status cell, not in columns.
   assert.match(html, /<th>Test<\/th><th>Gherkin<\/th><\/tr>/)
-  // status, blank line, report link, blank line, path — then Gherkin in column 2
-  assert.match(html, /<td>⛔ - failed \(webkit\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
-  // skip reason sits under the status; no gherkin source -> empty cell, row still rendered
-  assert.match(html, /⏭️ - skipped<br\/>TODO: step implementation pending \(@todo\)<br\/><br\/>/)
+  assert.match(html, /Breakdown after the status is per browser: 🔵 chromium · 🧭 webkit/)
+  // Scenario count vs test-run count: 3 scenarios, 4 runs (webkit skipped two).
+  assert.match(html, /<th>Scenarios<\/th><td>3 {3}✅ 1 {2}⛔ 1 {2}⏭️ 1<\/td>/)
+  assert.match(html, /<th>Test runs \(scenario × browser\)<\/th><td>4 {3}✅ 2 {2}⛔ 1 {2}⏭️ 1<\/td>/)
+  assert.match(html, /<th>Browsers<\/th><td>chromium · webkit<\/td>/)
+  // status + per-browser breakdown, blank line, report link, blank line, path — then Gherkin
+  assert.match(html, /<td>⛔ - failed \(🔵✅ · 🧭⛔\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
+  // Skip reason keeps the glyph of the browser that skipped; webkit never ran it.
+  // No gherkin source -> empty last cell, row still rendered.
+  assert.match(html, /⏭️ - skipped \(🔵⏭️ · 🧭➖\)<br\/>🔵 TODO: step implementation pending \(@todo\)<br\/><br\/>/)
   assert.match(html, /idtodo">report<\/a><br\/><br\/>Feature: grp › todo<\/td><td><\/td>/)
   assert.match(html, /<a href="http:\/\/x">CI run<\/a>/)
 
@@ -337,6 +420,11 @@ if (process.argv[2] === '--selfcheck') {
   }
   const oh = storageBody(or, { 'HTML report': 'https://o/' }, outline)
   assert.match(oh, /Scenario: Edit the foo of X<br\/> {2}When I change &quot;foo&quot;/) // placeholders bound, escaped
+  // A one-browser run (a PR, which is chromium-only) drops the breakdown and its
+  // legend — `passed (🔵✅)` on every row is the header line repeated.
+  assert.doesNotMatch(oh, /\(🔵/)
+  assert.doesNotMatch(oh, /Breakdown after/)
+  assert.match(oh, /<th>Browsers<\/th><td>chromium<\/td>/) // still says which one it was
 
   assert.deepEqual(failures({}), [])
   assert.equal(gherkinIndex('does-not-exist').size, 0) // missing sources must not crash the publish
