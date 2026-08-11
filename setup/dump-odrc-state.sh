@@ -9,6 +9,13 @@
 #   ./setup/dump-odrc-state.sh
 #
 # Used by the CI failure dump; handy locally for the same question.
+#
+# CAVEAT when reading this from a CI run: the failure dump runs *after* the suite,
+# and globalTeardown has by then deleted every `E2E `-prefixed row. So the document
+# counts legitimately read 0 there and say nothing about what the run saw — only
+# the wiring lines (services, rsin, url template, organisatie oorsprong) are
+# meaningful post-run. For per-document state during a run, the sitemap steps put
+# it in their own failure message (see documentReadiness).
 set -uo pipefail
 
 NAMESPACE="${NAMESPACE:-gpp-e2e}"

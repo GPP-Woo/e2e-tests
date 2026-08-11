@@ -188,19 +188,22 @@ export async function findDocumentEntry(
   sitemap: SitemapClient,
   burgerportaalBase: string,
   opts: { uuid?: string, officieleTitel?: string },
-): Promise<string | undefined> {
+): Promise<{ entry?: string, entryCount: number }> {
   return pollUntil(
     async () => {
       const entries = await collectAllUrlEntries(sitemap, burgerportaalBase)
-      return entries.find((entry) => {
-        if (opts.uuid && entryMatchesDocumentUuid(entry, opts.uuid))
+      const entry = entries.find((e) => {
+        if (opts.uuid && entryMatchesDocumentUuid(e, opts.uuid))
           return true
-        if (opts.officieleTitel && entryMatchesOfficieleTitel(entry, opts.officieleTitel))
+        if (opts.officieleTitel && entryMatchesOfficieleTitel(e, opts.officieleTitel))
           return true
         return false
       })
+      // Carry the total too: "not found among 0 entries" and "not found among 40"
+      // are different bugs, and the failure message should not make you guess.
+      return { entry, entryCount: entries.length }
     },
-    entry => !!entry,
+    found => !!found.entry,
   )
 }
 

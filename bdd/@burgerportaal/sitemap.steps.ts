@@ -17,6 +17,7 @@ import {
 import {
   activateLandelijkeOrganisatie,
   deleteDocumentViaToken,
+  documentReadiness,
   informatieCategorieUuidByNaam,
   patchDocument,
   patchPublicatiestatus,
@@ -305,11 +306,20 @@ When('I collect every document entry across all sitemaps', async ({ sitemap, scr
 })
 
 When('I look up its document entry in the sitemaps', async ({ sitemap, scratch }) => {
-  const entry = await findDocumentEntry(sitemap, BURG, {
-    uuid: scratch.get('sitemap:docUuid'),
-    officieleTitel: scratch.get('sitemap:docTitel'),
-  })
-  expect(entry, `document ${scratch.get('sitemap:docTitel')} present in a sitemap`).toBeTruthy()
+  const uuid = scratch.get('sitemap:docUuid')
+  const titel = scratch.get('sitemap:docTitel')
+  const { entry, entryCount } = await findDocumentEntry(sitemap, BURG, { uuid, officieleTitel: titel })
+  if (!entry) {
+    // Say which of the two it is rather than just "not present": the sitemap lists
+    // a document only once ODRC has asynchronously registered its upload
+    // (isGereedVoorPublicatie), so a miss is either that registration not having
+    // landed or the burgerportaal filtering the document out.
+    const readiness = uuid ? await documentReadiness(uuid) : 'no uuid tracked'
+    expect(
+      entry,
+      `document ${titel} present in a sitemap — searched ${entryCount} entr${entryCount === 1 ? 'y' : 'ies'}, ODRC says ${readiness}`,
+    ).toBeTruthy()
+  }
   scratch.set('sitemap:entry', entry!)
 })
 
@@ -420,7 +430,13 @@ async function expectSeededDocumentPresence(
   const uuid = requireScratch(scratch, 'sitemap:docUuid')
   const present = (entries: string[]) => entries.some(e => entryMatchesDocumentUuid(e, uuid))
   const entries = await currentMonthEntriesUntil(sitemap, es => present(es) === expected)
-  expect(present(entries), `document ${uuid} present in ${currentMonthSitemapPath()}`).toBe(expected)
+  if (present(entries) !== expected) {
+    const readiness = await documentReadiness(uuid)
+    expect(
+      present(entries),
+      `document ${uuid} present in ${currentMonthSitemapPath()} — ${entries.length} entries there, ODRC says ${readiness}`,
+    ).toBe(expected)
+  }
   return entries
 }
 

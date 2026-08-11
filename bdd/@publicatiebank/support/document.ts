@@ -72,6 +72,30 @@ async function postJson(ctx: APIRequestContext, path: string, data: unknown): Pr
  * AnonymousUser instead of None, so the sessionprofile middleware's
  * `request.user.is_authenticated` doesn't raise). See seedPublishedDocument.
  */
+/**
+ * What ODRC itself thinks of a document, for a failure message.
+ *
+ * The DiWoo sitemap only lists a document that is `gepubliceerd` **and**
+ * `isGereedVoorPublicatie` — the latter flips only once the worker has registered
+ * the uploaded file with the Documenten API, which is asynchronous. So "missing
+ * from the sitemap" has two very different causes, and which one it is decides
+ * whether to look at the test or at the stack. Never throws: it exists to explain
+ * another failure, not to add one.
+ */
+export async function documentReadiness(uuid: string): Promise<string> {
+  const ctx = await apiRequest.newContext()
+  try {
+    const doc = await getJson(ctx, `documenten/${uuid}`)
+    return `publicatiestatus=${doc.publicatiestatus} isGereedVoorPublicatie=${doc.isGereedVoorPublicatie}`
+  }
+  catch (e) {
+    return `could not be read back from ODRC (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`
+  }
+  finally {
+    await ctx.dispose()
+  }
+}
+
 async function getJson(ctx: APIRequestContext, path: string): Promise<any> {
   for (let attempt = 0; ; attempt++) {
     const res = await ctx.get(new URL(path, API_BASE).href, { headers: tokenHeaders() })
