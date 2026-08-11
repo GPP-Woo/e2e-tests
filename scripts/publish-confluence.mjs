@@ -29,6 +29,11 @@ const LABEL = { expected: 'passed', unexpected: 'failed', flaky: 'flaky', skippe
  */
 const BROWSER = { chromium: '🔵', firefox: '🦊', webkit: '🧭' }
 const glyph = p => BROWSER[p] ?? esc(p)
+/* `setup` is a Playwright project but not a browser: it signs in once and every
+   browser project depends on it. Listing it would hang a dead `setup➖` off every
+   scenario's breakdown. Its own specs stay in the table — if sign-in breaks, that
+   is the row you want to see — they just carry no browser breakdown. */
+const NON_BROWSER = new Set(['setup'])
 // Between browser/status pairs. The pair itself is unseparated: `🦊✅` reads as
 // one token, where `🦊-✅` reads as three and the row turns into punctuation.
 const PAIR_SEP = ' · '
@@ -139,7 +144,7 @@ export function projectsIn(report) {
   const walk = (suite) => {
     for (const spec of suite.specs ?? []) {
       for (const t of spec.tests ?? []) {
-        if (t.projectName)
+        if (t.projectName && !NON_BROWSER.has(t.projectName))
           seen.add(t.projectName)
       }
     }
@@ -160,36 +165,59 @@ export function projectsIn(report) {
  * A browser missing from `spec.tests` was filtered out before the run — by
  * `grepInvert` on the project (@chromium-only, @no-webkit) or by `--project` on
  * the command line — and is reported as `notrun`, not as a pass or a skip.
+ *
+ * Note the JSON reporter does NOT do that grouping for us: a three-browser run
+ * emits the same scenario three times as sibling specs, each holding a single
+ * `test`. They are folded back together here on file+line+column, which is what
+ * identifies a scenario — every project runs the same generated spec file, so
+ * the location is identical and only `spec.id` differs.
  */
 export function scenarios(report, projects = projectsIn(report)) {
-  const out = []
+  const byLocation = new Map()
   const walk = (suite, path) => {
     for (const spec of suite.specs ?? []) {
-      const tests = spec.tests ?? []
-      const byProject = new Map(tests.map(t => [t.projectName, t]))
-      const browsers = projects.map((project) => {
-        const t = byProject.get(project)
-        return {
-          project,
-          status: t ? t.status : 'notrun',
-          reason: t && t.status === 'skipped' ? skipReason(t) : '',
+      const key = `${spec.file}:${spec.line}:${spec.column}`
+      let row = byLocation.get(key)
+      if (!row) {
+        row = {
+          file: spec.file,
+          scenario: spec.title,
+          title: [...path, spec.title].join(' › '),
+          ids: {},
+          tests: [],
         }
-      })
-      const status = tests.reduce((worst, t) => RANK[t.status] > RANK[worst] ? t.status : worst, 'skipped')
-      out.push({
-        file: spec.file,
-        scenario: spec.title,
-        title: [...path, spec.title].join(' › '),
-        id: spec.id,
-        status,
-        browsers,
-        reason: [...new Set(browsers.map(b => b.reason).filter(Boolean))].join('; '),
-      })
+        byLocation.set(key, row)
+      }
+      for (const t of spec.tests ?? []) {
+        row.tests.push(t)
+        // Per-project, because the HTML report has a separate testId per browser
+        // and the row should link to the browser worth looking at.
+        row.ids[t.projectName] = spec.id
+      }
     }
     for (const child of suite.suites ?? []) walk(child, [...path, child.title])
   }
   for (const s of report.suites ?? []) walk(s, [])
-  return out
+
+  return [...byLocation.values()].map(({ ids, tests, ...row }) => {
+    const byProject = new Map(tests.map(t => [t.projectName, t]))
+    const browsers = projects.map((project) => {
+      const t = byProject.get(project)
+      return {
+        project,
+        status: t ? t.status : 'notrun',
+        reason: t && t.status === 'skipped' ? skipReason(t) : '',
+      }
+    })
+    const status = tests.reduce((worst, t) => RANK[t.status] > RANK[worst] ? t.status : worst, 'skipped')
+    return {
+      ...row,
+      id: ids[tests.find(t => t.status === status)?.projectName] ?? Object.values(ids)[0],
+      status,
+      browsers,
+      reason: [...new Set(browsers.map(b => b.reason).filter(Boolean))].join('; '),
+    }
+  })
 }
 
 /** Every scenario that did not pass, as a plain `file › suite › scenario` string. */
@@ -239,8 +267,9 @@ export function storageBody(report, links, gherkin = new Map()) {
 
   const row = (x) => {
     // Worst-wins status, then the same result broken down per browser. Dropped
-    // when only one browser ran: `passed (🔵✅)` is the header line again.
-    const breakdown = projects.length > 1
+    // when only one browser ran (`passed (🔵✅)` is the header line again) and on
+    // a row no browser ran at all, which is the setup project's own specs.
+    const breakdown = projects.length > 1 && x.browsers.some(b => b.status !== 'notrun')
       ? ` (${x.browsers.map(b => `${glyph(b.project)}${ICON[b.status]}`).join(PAIR_SEP)})`
       : ''
     // A skip reason belongs to the browser that skipped, so it keeps its glyph.
@@ -330,43 +359,56 @@ async function main() {
 }
 
 if (process.argv[2] === '--selfcheck') {
+  /* Shaped the way the JSON reporter really emits a multi-browser run: one spec
+     per scenario *per project*, siblings in the same suite, sharing a location
+     and differing only in `id`. Merging those back is the whole job. */
+  const spec = (title, id, line, tests) => ({ title, id, file: 'a.feature.spec.js', line, column: 7, tests })
   const r = {
     stats: { expected: 2, unexpected: 1, flaky: 0, skipped: 0, duration: 12000, startTime: 'T' },
     suites: [{
       title: 'a.feature.spec.js',
-      specs: [{ title: 'top', id: 'idtop', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }] }],
+      specs: [spec('top', 'idtop', 2, [{ status: 'expected', projectName: 'chromium' }])],
       suites: [{
         title: 'Feature: grp',
         specs: [
-          // fails in webkit only -> worst-wins overall, both browsers shown
-          { title: 'b<ad>', id: 'idbad', file: 'a.feature.spec.js', tests: [{ status: 'expected', projectName: 'chromium' }, { status: 'unexpected', projectName: 'webkit' }] },
-          {
-            title: 'todo',
-            id: 'idtodo',
-            file: 'a.feature.spec.js',
-            tests: [{
-              status: 'skipped',
-              projectName: 'chromium',
-              annotations: [{ type: 'skip', description: 'TODO: step implementation pending (@todo)' }],
-            }],
-          },
+          spec('b<ad>', 'idbad-c', 5, [{ status: 'expected', projectName: 'chromium' }]),
+          spec('todo', 'idtodo', 9, [{
+            status: 'skipped',
+            projectName: 'chromium',
+            annotations: [{ type: 'skip', description: 'TODO: step implementation pending (@todo)' }],
+          }]),
+          // The webkit half of the run: same scenario, same location, own id.
+          // Fails here only -> worst-wins overall, both browsers in the breakdown.
+          spec('b<ad>', 'idbad-w', 5, [{ status: 'unexpected', projectName: 'webkit' }]),
         ],
       }],
+    }, {
+      title: 'auth.setup.ts',
+      specs: [{ title: 'sign in', id: 'idsetup', file: 'auth.setup.ts', line: 1, column: 1, tests: [{ status: 'expected', projectName: 'setup' }] }],
     }],
   }
   assert.deepEqual(failures(r), ['a.feature.spec.js › Feature: grp › b<ad>'])
-  // Browser columns come from the results, in first-seen order.
+  // Five specs in, four scenarios out: the two `b<ad>` halves are one scenario.
+  assert.deepEqual(scenarios(r).map(s => s.scenario), ['top', 'b<ad>', 'todo', 'sign in'])
+  // Browsers come from the results in first-seen order; `setup` is not a browser.
   assert.deepEqual(projectsIn(r), ['chromium', 'webkit'])
   assert.deepEqual(
     scenarios(r).map(s => `${s.status}:${s.reason}`),
-    ['expected:', 'unexpected:', 'skipped:TODO: step implementation pending (@todo)'],
+    ['expected:', 'unexpected:', 'skipped:TODO: step implementation pending (@todo)', 'expected:'],
   )
   // Per browser: a spec with no webkit `test` was filtered out before the run,
   // which is `notrun` — not a pass, and not a skip either.
   assert.deepEqual(
     scenarios(r).map(s => s.browsers.map(b => `${b.project}=${b.status}`).join(',')),
-    ['chromium=expected,webkit=notrun', 'chromium=expected,webkit=unexpected', 'chromium=skipped,webkit=notrun'],
+    [
+      'chromium=expected,webkit=notrun',
+      'chromium=expected,webkit=unexpected',
+      'chromium=skipped,webkit=notrun',
+      'chromium=notrun,webkit=notrun',
+    ],
   )
+  // The merged row links to the browser worth opening — the one that failed.
+  assert.equal(scenarios(r)[1].id, 'idbad-w')
   // The skip reason sits on the browser that skipped, not on the whole scenario.
   assert.deepEqual(
     scenarios(r)[2].browsers.map(b => b.reason),
@@ -389,12 +431,15 @@ if (process.argv[2] === '--selfcheck') {
   // Two columns — the browsers live inside the status cell, not in columns.
   assert.match(html, /<th>Test<\/th><th>Gherkin<\/th><\/tr>/)
   assert.match(html, /Breakdown after the status is per browser: 🔵 chromium · 🧭 webkit/)
-  // Scenario count vs test-run count: 3 scenarios, 4 runs (webkit skipped two).
-  assert.match(html, /<th>Scenarios<\/th><td>3 {3}✅ 1 {2}⛔ 1 {2}⏭️ 1<\/td>/)
+  // Scenario count vs test-run count: 4 scenarios (one of them setup's own, which
+  // no browser runs), 4 browser runs — `b<ad>` is one scenario counted twice here.
+  assert.match(html, /<th>Scenarios<\/th><td>4 {3}✅ 2 {2}⛔ 1 {2}⏭️ 1<\/td>/)
   assert.match(html, /<th>Test runs \(scenario × browser\)<\/th><td>4 {3}✅ 2 {2}⛔ 1 {2}⏭️ 1<\/td>/)
   assert.match(html, /<th>Browsers<\/th><td>chromium · webkit<\/td>/)
   // status + per-browser breakdown, blank line, report link, blank line, path — then Gherkin
-  assert.match(html, /<td>⛔ - failed \(🔵✅ · 🧭⛔\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
+  assert.match(html, /<td>⛔ - failed \(🔵✅ · 🧭⛔\)<br\/><br\/><a href="https:\/\/o\.github\.io\/e2e\/#\?testId=idbad-w">report<\/a><br\/><br\/>Feature: grp › b&lt;ad&gt;<\/td><td>Scenario: b&lt;ad&gt;<br\/> {2}Given x<\/td>/)
+  // The setup project's own spec: a real row, but no browser breakdown to show.
+  assert.match(html, /<td>✅ - passed<br\/><br\/><a href="[^"]*testId=idsetup"/)
   // Skip reason keeps the glyph of the browser that skipped; webkit never ran it.
   // No gherkin source -> empty last cell, row still rendered.
   assert.match(html, /⏭️ - skipped \(🔵⏭️ · 🧭➖\)<br\/>🔵 TODO: step implementation pending \(@todo\)<br\/><br\/>/)
