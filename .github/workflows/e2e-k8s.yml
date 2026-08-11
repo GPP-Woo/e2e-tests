@@ -1,0 +1,275 @@
+name: E2E on local k8s
+# Spins up the whole GPP stack from the Helm charts in a kind cluster (same hack/up.sh
+# used locally) and runs the Playwright suite against it. Validates the real charts on every PR.
+on:
+  pull_request:
+  # Nightly full-matrix run. PRs run chromium only (see BROWSERS below): firefox
+  # and webkit are 138 of the 310 tests and exist to catch engine differences,
+  # which change on the browsers' release cadence, not on a PR. Once a night is
+  # the right frequency for that; twice per PR is not.
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      browsers:
+        description: Browsers to run
+        type: choice
+        options: [all, chromium]
+        default: all
+
+# `pages: write` + `id-token: write` are needed by the deploy job below. Fork PRs
+# get a read-only token regardless, but the deploy is gated off for PRs anyway.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A repo has exactly one Pages site, so two runs deploying at once clobber each
+# other. Serialise (don't cancel — a half-finished deploy is worse than a queue).
+concurrency:
+  group: ${{ github.workflow }}-pages
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # ~10 min to build the images and bring the stack up, then the suite itself.
+    # 60 was not enough once the @todo gap scenarios were implemented and the run
+    # got cancelled mid-suite, which uploads no report and tells you nothing.
+    timeout-minutes: 90
+    env:
+      # Single source of truth: keep in sync with the Helm used locally for
+      # hack/up.sh (needs Helm 4 for `--server-side --force-conflicts`).
+      HELM_VERSION: v4.2.3
+      # `all` -> every project in playwright.config.ts; `chromium` -> just that
+      # one (Playwright pulls in its `setup` dependency by itself).
+      BROWSERS: ${{ inputs.browsers || (github.event_name == 'pull_request' && 'chromium' || 'all') }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: e2e-tests}
+      # Sibling checkouts: hack/up.sh builds every app image from source (no emulation, and
+      # the published Django/openzaak images are amd64-only), so all app repos must be here.
+      # open-zaak is cloned by up.sh itself.
+      - uses: actions/checkout@v4
+        # hack/ (up.sh, kind-config.yaml) lives on this branch, not charts' main yet.
+        with: {repository: GPP-Woo/charts, ref: explore/local-via-k3d, path: charts}
+      - uses: actions/checkout@v4
+        with: {repository: GPP-Woo/GPP-app, ref: feat/local-dev-stack, path: GPP-app}
+      - uses: actions/checkout@v4
+        with: {repository: GPP-Woo/GPP-burgerportaal, ref: feat/local-dev-stack, path: GPP-burgerportaal}
+      - uses: actions/checkout@v4
+        # Pinned, not default: main still returns `(None, token)` from
+        # TokenAuthentication, and SessionProfileMiddleware then dereferences
+        # request.user -> every token API call 500s while an admin session is
+        # active. Drop the ref once fix/token-auth-anonymoususer is merged.
+        with: {repository: GPP-Woo/GPP-publicatiebank, ref: fix/token-auth-anonymoususer, path: GPP-publicatiebank}
+      - uses: actions/checkout@v4
+        # submodules: shared/dotgithub provides fileTypes.json, required by the image build
+        with: {repository: GPP-Woo/GPP-zoeken, path: GPP-zoeken, submodules: true}
+
+      # Building every app image from source + loading them into the kind node
+      # fills the runner's ~14 GB disk, so `playwright install --with-deps` then
+      # fails with "No space left on device". Reclaim the big preinstalled
+      # toolchains we don't use (Android SDK ~9 GB, .NET, GHC, Swift).
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/share/boost /usr/share/swift /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      # Installs kind + kubectl + helm and creates the cluster with our port mappings.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: gpp-e2e
+          config: charts/hack/kind-config.yaml
+
+      # hack/up.sh uses `helm upgrade --server-side --force-conflicts`, which is
+      # a Helm 4 feature. Pin the exact version we develop against (HELM_VERSION)
+      # so the runner, up.sh and this pipeline all run the same Helm. get-helm-3
+      # only fetches Helm 3, so install the v4 tarball straight over PATH.
+      - name: Install Helm ${{ env.HELM_VERSION }}
+        run: |
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar xz
+          sudo install -m 0755 linux-amd64/helm /usr/local/bin/helm
+          rm -rf linux-amd64
+          helm version
+
+      - name: Raise vm.max_map_count for Elasticsearch (ECK)
+        run: sudo sysctl -w vm.max_map_count=262144
+
+      # Building the five app images from source is ~8 of the ~10 min up.sh takes,
+      # and the app repos are pinned refs that rarely move. Key the cache on their
+      # resolved HEADs (which cover their Dockerfiles too) plus up.sh itself —
+      # that script holds the build commands and the OPENZAAK_VERSION default, so
+      # hashing it is what keeps an openzaak bump from restoring a stale image.
+      - name: Compute image cache key
+        id: imgkey
+        run: |
+          key=$({ for d in GPP-app GPP-burgerportaal GPP-publicatiebank GPP-zoeken; do
+                    git -C "$d" rev-parse HEAD
+                  done
+                  sha256sum charts/hack/up.sh; } | sha256sum | cut -c1-16)
+          echo "key=gpp-images-v1-$key" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: image-cache
+        with:
+          path: /tmp/gpp-images.tar
+          key: ${{ steps.imgkey.outputs.key }}
+      - name: Load cached images
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/gpp-images.tar
+
+      - name: Bring up the GPP stack from charts
+        id: up
+        working-directory: charts
+        env:
+          # up.sh reuses whatever *:local images are already in the daemon.
+          SKIP_BUILD: ${{ steps.image-cache.outputs.cache-hit == 'true' && '1' || '' }}
+        run: USE_EXISTING_CLUSTER=1 bash hack/up.sh
+
+      # Only on a clean bring-up: a tar written from a half-built stack would be
+      # restored next run under SKIP_BUILD=1 and fail with no build to fix it.
+      # actions/cache's post-job step uploads the file, so writing it here is enough.
+      - name: Stage images for the cache
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' && steps.up.outcome == 'success' }}
+        # Write to a temp name and rename: actions/cache uploads whatever is at
+        # the path in the post-job step, so a save killed halfway would otherwise
+        # cache a truncated tar under a key that looks valid forever.
+        run: |
+          docker save -o /tmp/gpp-images.tar.part \
+            odpc:local odbp:local gpp-publicatiebank:local gpp-zoeken:local openzaak:local
+          mv /tmp/gpp-images.tar.part /tmp/gpp-images.tar
+          ls -lh /tmp/gpp-images.tar; df -h /
+
+      # The charts do not wire the Documenten API (no DRC Service, no
+      # GlobalConfiguration.documents_api_service, and OpenZaak has no ORC service
+      # for the publicatiebank catalogi), so POST /api/v2/documenten answers 500 and
+      # every scenario that seeds a document fails. This is the same once-per-fresh-
+      # stack step the README documents for a local bring-up. It also sets the
+      # publication URL templates, which ship empty (see the script's header).
+      - name: Provision the Documenten API on the stack
+        working-directory: e2e-tests
+        run: ./setup/provision-documenten-api.sh
+
+      - uses: actions/setup-node@v4
+        with: {node-version: lts/*}
+      - name: Install e2e deps
+        working-directory: e2e-tests
+        run: |
+          npm ci
+          npx playwright install --with-deps
+
+      - name: Run Playwright suite
+        working-directory: e2e-tests
+        env:
+          # Local realm test users (from charts/dev/infra/files/realm.json).
+          DEFAULT_EMAIL: user@example.com
+          DEFAULT_PASSWORD: user
+          DEFAULT_OTP_SECRET: gpp-user-otp-seed-0001
+          ADMIN_EMAIL: admin@example.com
+          ADMIN_PASSWORD: admin
+          ADMIN_OTP_SECRET: gpp-admin-otp-seed-0001
+          # NodePort URLs (see charts/hack/kind-config.yaml).
+          GPP_APP_BASE_URL: http://localhost:8130
+          GPP_PUBLICATIEBANK_BASE_URL: http://localhost:8000
+          GPP_BURGERPORTAAL_BASE_URL: http://localhost:8140
+          ODRC_BASE_URL: http://localhost:8000
+          ODRC_API_KEY: insecure-ea1a8d297e3b2d3313b8a30b18959c3
+          GPP_ZOEKEN_BASE_URL: http://localhost:8110
+          # The sitemap refetch steps refuse to guess this (the prod output cache is
+          # ~23h — see waitForSitemapCacheExpiry). charts dev/values/odbp.yaml sets
+          # sitemapCacheDurationHours: 0, so no wait is needed here.
+          SITEMAP_CACHE_WAIT_MS: 0
+          # OpenZaak Documenten API (dev/openzaak chart); client creds come from the
+          # auto-loaded configuration.json fixture.
+          OPENZAAK_BASE_URL: http://localhost:8001
+          DRC_ROOT: http://localhost:8001/documenten/api/v1/
+          OPENZAAK_CLIENT_ID: woo-publications-dev
+          OPENZAAK_SECRET: insecure-yQL9Rzh4eHGVmYx5w3J2gu
+        # `setup` is named explicitly rather than left to chromium's `dependencies`:
+        # Playwright does run dependencies of a --project selection, but if that
+        # ever changes the failure mode is every scenario failing on a missing
+        # .auth/*.json, which is a miserable thing to debug for one saved flag.
+        run: |
+          if [ "$BROWSERS" = all ]; then
+            npm test
+          else
+            npm test -- --project=setup --project=chromium
+          fi
+
+      - name: Dump cluster state on failure
+        # cancelled() too: a timeout-cancel is the case where a wedged pod is the
+        # likeliest cause, so that is when this dump is worth the most.
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl -n gpp-e2e get pods -o wide || true
+          kubectl -n gpp-e2e get elasticsearch || true
+          helm list -n gpp-e2e || true
+          kubectl -n gpp-e2e describe pods || true
+          # By deployment name, not by app.kubernetes.io/instance: the publicatiebank
+          # pods carry no instance label, and `instance=odrc`/`zoeken` match only the
+          # *redis* pods — so this used to dump redis logs and never the app or worker
+          # logs anyone actually needs. openzaak has no `app` label either.
+          for d in gpp-publicatiebank gpp-publicatiebank-worker gpp-burgerportaal \
+                   gpp-app gpp-zoeken gpp-zoeken-worker openzaak-web openzaak-celery; do
+            echo "::group::logs deploy/$d"
+            kubectl -n gpp-e2e logs "deploy/$d" --tail=120 || true
+            echo "::endgroup::"
+          done
+          # Why a document never reaches the sitemap (gepubliceerd + upload_complete +
+          # publisher not zelf_toegevoegd). An empty sitemap is almost always one of
+          # those three, and none of them show up in a pod log.
+          echo "::group::ODRC document/publisher state"
+          ./e2e-tests/setup/dump-odrc-state.sh || true
+          echo "::endgroup::"
+
+      # Zip for PR runs and for anyone who wants the raw report. `always()`, not
+      # `!cancelled()`: a job that hits timeout-minutes counts as cancelled, and
+      # that is exactly when you most want the partial report.
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: playwright-report
+          path: e2e-tests/playwright-report
+
+      # The HTML report is a self-contained static site: playwright-report/trace/
+      # is the bundled trace viewer and data/*.zip are the traces, so serving the
+      # directory over HTTP gives clickable, fully interactive traces — no upload
+      # to trace.playwright.dev, no `npx playwright show-trace`. (Only over HTTP —
+      # opening index.html from the unzipped artifact via file:// cannot load them.)
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ !cancelled() }}
+        with:
+          path: e2e-tests/playwright-report/
+
+      # Mirrors the run summary onto a fixed Confluence page. REPORT_URL is the
+      # Pages site (stable URL, always the latest run); the CI-run link in the
+      # summary points at this specific run's zip artifact.
+      # Per-environment page: set CONFLUENCE_PAGE_ID as a GitHub *Environment*
+      # variable once this job takes an `environment:`.
+      - name: Publish summary to Confluence
+        if: ${{ !cancelled() && vars.CONFLUENCE_PAGE_ID != '' }}
+        working-directory: e2e-tests
+        env:
+          CONFLUENCE_BASE: ${{ vars.CONFLUENCE_BASE }}
+          CONFLUENCE_USER: ${{ vars.CONFLUENCE_USER }}
+          CONFLUENCE_TOKEN: ${{ secrets.CONFLUENCE_TOKEN }}
+          CONFLUENCE_PAGE_ID: ${{ vars.CONFLUENCE_PAGE_ID }}
+          REPORT_URL: ${{ vars.REPORT_URL }}
+        run: node scripts/publish-confluence.mjs
+
+  # Separate job: deploy-pages must run in the `github-pages` environment.
+  # PR runs deploy too. A repo has exactly ONE Pages site and every deploy
+  # replaces it, so the URL always shows the most recent run — PR or not.
+  # Per-PR routes would need a gh-pages branch with pr-<n>/ directories (and a
+  # Pages source switch); at ~112 MB a report that hits the 1 GB site cap fast.
+  deploy-report:
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
