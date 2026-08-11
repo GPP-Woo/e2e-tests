@@ -138,10 +138,22 @@ jobs:
           kubectl -n gpp-e2e get elasticsearch || true
           helm list -n gpp-e2e || true
           kubectl -n gpp-e2e describe pods || true
-          for l in odpc odbp odrc zoeken; do
-            kubectl -n gpp-e2e logs -l app.kubernetes.io/instance=$l --tail=100 || true
+          # By deployment name, not by app.kubernetes.io/instance: the publicatiebank
+          # pods carry no instance label, and `instance=odrc`/`zoeken` match only the
+          # *redis* pods — so this used to dump redis logs and never the app or worker
+          # logs anyone actually needs. openzaak has no `app` label either.
+          for d in gpp-publicatiebank gpp-publicatiebank-worker gpp-burgerportaal \
+                   gpp-app gpp-zoeken gpp-zoeken-worker openzaak-web openzaak-celery; do
+            echo "::group::logs deploy/$d"
+            kubectl -n gpp-e2e logs "deploy/$d" --tail=120 || true
+            echo "::endgroup::"
           done
-          kubectl -n gpp-e2e logs -l app=openzaak --tail=100 || true
+          # Why a document never reaches the sitemap (gepubliceerd + upload_complete +
+          # publisher not zelf_toegevoegd). An empty sitemap is almost always one of
+          # those three, and none of them show up in a pod log.
+          echo "::group::ODRC document/publisher state"
+          ./e2e-tests/setup/dump-odrc-state.sh || true
+          echo "::endgroup::"
 
       # Zip for PR runs and for anyone who wants the raw report. `always()`, not
       # `!cancelled()`: a job that hits timeout-minutes counts as cancelled, and
