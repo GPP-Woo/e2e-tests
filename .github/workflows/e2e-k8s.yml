@@ -121,6 +121,10 @@ jobs:
           ODRC_BASE_URL: http://localhost:8000
           ODRC_API_KEY: insecure-ea1a8d297e3b2d3313b8a30b18959c3
           GPP_ZOEKEN_BASE_URL: http://localhost:8110
+          # The sitemap refetch steps refuse to guess this (the prod output cache is
+          # ~23h — see waitForSitemapCacheExpiry). charts dev/values/odbp.yaml sets
+          # sitemapCacheDurationHours: 0, so no wait is needed here.
+          SITEMAP_CACHE_WAIT_MS: 0
           # OpenZaak Documenten API (dev/openzaak chart); client creds come from the
           # auto-loaded configuration.json fixture.
           OPENZAAK_BASE_URL: http://localhost:8001
