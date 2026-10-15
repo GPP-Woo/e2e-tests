@@ -7,6 +7,9 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
+# playwright cli output
+.playwright-cli
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
@@ -135,9 +138,15 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Playwright BDD generated specs
+.features-gen/
+
 # Playwright
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
 .auth
+
+# Throwaway run artifacts (ad-hoc reports/logs kept out of the tree)
+/scratch/

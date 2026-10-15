@@ -15,21 +15,36 @@
   "keywords": [],
   "main": "index.js",
   "scripts": {
+    "otp": "node scripts/otp.mjs admin",
+    "otp:user": "node scripts/otp.mjs user",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "npx playwright test -c auth.playwright.config.ts && npx playwright test"
+    "bddgen": "bddgen",
+    "dev": "bddgen && playwright test --ui --project=chromium",
+    "test": "bddgen && playwright test",
+    "test:ui": "bddgen && playwright test --ui",
+    "test:admin": "bddgen && playwright test --grep @admin",
+    "test:gpp-app": "bddgen && playwright test --grep @gpp-app",
+    "test:publicatiebank": "bddgen && playwright test --grep @publicatiebank",
+    "test:burgerportaal": "bddgen && playwright test --grep @burgerportaal",
+    "test:beheer": "bddgen && playwright test --grep @beheer"
   },
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.6.0",
+    "openai": "^4.104.0",
     "otpauth": "^9.4.0",
-    "zod": "^3.24.3"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.12.0",
+    "@cucumber/gherkin": "^39.1.0",
+    "@cucumber/messages": "^34.2.0",
     "@playwright/test": "^1.52.0",
     "@types/node": "^22.14.1",
     "dotenv": "^16.5.0",
     "eslint": "^9.24.0",
     "eslint-plugin-format": "^1.0.1",
+    "playwright-bdd": "^9.2.0",
     "typescript": "^5.8.3"
   }
 }

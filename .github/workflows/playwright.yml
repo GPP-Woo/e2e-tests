@@ -1,9 +1,11 @@
 name: Playwright Tests
+# Manual only. This runs the suite against the shared maykin/icatt accept
+# environments, which have no burgerportaal deployed and no ODRC API token — so
+# `bdd/_core/types.ts` throws a ZodError on GPP_BURGERPORTAAL_BASE_URL and
+# ODRC_API_KEY before a single test starts. Set both on the environment to make
+# it runnable again (and add them to the `env:` block below); until then it is
+# superseded by e2e-k8s.yml, which runs the same suite against a real stack.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}
