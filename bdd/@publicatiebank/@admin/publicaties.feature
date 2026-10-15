@@ -127,3 +127,24 @@ Feature: Publicatie beheer in de GPP-publicatiebank
     Given a concept publicatie
     When I search the admin for the publicatie and open it
     Then the publicatie change form is shown
+
+  # Manual TS9: "Je kunt de filters (rechts) gebruiken. Je kunt de lijst
+  # sorteren door op de kolomtitel te klikken." Not yet covered here, unlike the
+  # equivalent scenarios for organisaties/onderwerpen/informatiecategorieën.
+  Scenario: Sort the publicaties list by officiële titel
+    Given a concept publicatie
+    When I sort the publicaties list by officiële titel
+    Then the publicaties are listed in alphabetical order by officiële titel
+
+  Scenario: Filter the publicaties list on publicatiestatus
+    Given a concept publicatie
+    When I filter the publicaties list on "Concept"
+    Then only "Concept" publicaties are shown in the results
+
+  # Manual TS9: "In de lijst met publicaties staat rechts naast iedere
+  # publicatie een link 'Toon logs'." (distinct from the detail page's own
+  # "Toon logs" button, which the audit-log scenarios above open instead.)
+  Scenario: The overview "Toon logs" link opens a publicatie's audit trail
+    Given a concept publicatie
+    When I open the "Toon logs" link for the publicatie from the overview
+    Then I see audit log entries for the publicatie

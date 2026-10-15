@@ -86,3 +86,21 @@ Feature: Informatiecategorieën management
     Given I have deleted the self-added information category through the UI
     When I open the "(audit)logitems" via the "Logging" tab
     Then the deletion of the information category is recorded in the audit log
+
+  # Manual TS2: the overview lists a "Toon logs" link per row, distinct from the
+  # detail page's own "Toon logs" button (already covered above).
+  Scenario: The overview "Toon logs" link opens the self-added category's audit trail
+    When I open the "Toon logs" link for the self-added information category from the overview
+    Then I see audit log entries for the self-added information category
+
+  # Manual TS2: "Je kunt de logitems: Doorzoeken, Sorteren, Filteren."
+  Scenario: The audit logitems can be searched, filtered and sorted
+    Given I have deleted the self-added information category through the UI
+    When I open the "(audit)logitems" via the "Logging" tab
+    And I search the audit log for the self-added information category
+    Then only entries mentioning the self-added information category are shown
+    When I filter the audit log by the "Record verwijderd" event
+    Then every audit log result is a "Record verwijderd" event
+    When I filter the audit log by the "Alle" event
+    And I sort the audit log by "Datum en tijd"
+    Then the audit log order changes

@@ -229,6 +229,30 @@ Then('the same organisaties are available in the GPP-app gebruikersgroep waardel
   }
 })
 
+// --- Restricted fields on a waardelijst organisatie -------------------------
+
+function formRow(page: Page, label: string) {
+  return page.locator('.form-row').filter({ has: page.locator('label', { hasText: label }) })
+}
+
+When('I open a waardelijst organisatie', async ({ page }) => {
+  // "Register gemeenten compleet" is the municipality-list origin — always
+  // seeded, unlike the self-added organisaties every other scenario creates.
+  await page.locator('#changelist-filter').getByRole('link', { name: 'Register gemeenten compleet', exact: true }).click()
+  const firstRow = page.locator('th.field-naam a').first()
+  await firstRow.waitFor()
+  await firstRow.click()
+})
+
+Then('its naam and oorsprong fields are read-only', async ({ page }) => {
+  await expect(formRow(page, 'Naam:').locator('.readonly')).toBeVisible()
+  await expect(formRow(page, 'Oorsprong:').locator('.readonly')).toBeVisible()
+})
+
+Then('its RSIN field is editable', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: 'RSIN:' })).toBeEditable()
+})
+
 // --- Logging: "Toon logs" on a self-added organisatie ----------------------
 
 When('I open the organisatie logs via {string}', async ({ page, organisations }, _button: string) => {

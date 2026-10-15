@@ -39,6 +39,16 @@ Feature: Publicaties creëren en intrekken in de GPP-app
   # search / filter / sort / open behaviours.
   # ==========================================================================
 
+  # Manual TS6 update (March 2026): "Wanneer je geautoriseerd bent voor maar één
+  # informatiecategorie en/of maar één organisatie, dan wordt deze automatisch
+  # geselecteerd." The default `authProfile.seed()` (choices: 1) is exactly this
+  # case, and the create flow already relies on it (see the `choices: 2` comment
+  # below) without a scenario asserting it directly.
+  Scenario: A single authorised organisatie and informatiecategorie are pre-selected
+    Given the signed-in user belongs to an authorised gebruikersgroep
+    When I open a new publicatie form
+    Then the organisatie and informatiecategorie are already selected
+
   Scenario: Select onderwerpen when creating a publicatie
     Given the signed-in user belongs to an authorised gebruikersgroep
     When I select one or more onderwerpen while creating a publicatie

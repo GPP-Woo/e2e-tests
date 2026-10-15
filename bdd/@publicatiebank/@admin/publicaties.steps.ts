@@ -13,6 +13,7 @@ import {
   publicationOmschrijvingAdmin,
   publicationStatusAdmin,
   publicationUuidAdmin,
+  resource,
   savePublicationForm,
   searchPublicationAdmin,
 } from '@/bdd/@publicatiebank/support/publication'
@@ -274,4 +275,58 @@ When('I search the admin for the publicatie and open it', async ({ page, publica
 
 Then('the publicatie change form is shown', async ({ page, publications }) => {
   await expect(page.locator('#id_officiele_titel')).toHaveValue(publications.last())
+})
+
+// --- Sort / filter (changelist reads under test) ----------------------------
+
+/** The `E2E pub ` prefix every scenario's publicaties carry (see `publications` fixture). */
+const PUBLICATIE_PREFIX = 'E2E pub '
+
+When('I sort the publicaties list by officiële titel', async ({ page, publications }) => {
+  // A second publicatie so the list has more than one row to actually reorder.
+  await publications.seed()
+  await openPublicationChangelist(page, PUBLICATIE_PREFIX)
+  await page.getByRole('link', { name: 'Officiële titel', exact: true }).click()
+})
+
+Then('the publicaties are listed in alphabetical order by officiële titel', async ({ page }) => {
+  const titels = (await page.locator('th.field-officiele_titel a').allTextContents()).map(t => t.trim())
+  expect(titels.length).toBeGreaterThan(1)
+  expect(titels).toEqual([...titels].sort((a, b) => a.localeCompare(b)))
+})
+
+When('I filter the publicaties list on {string}', async ({ page, publications, organisations }, _status: string) => {
+  // A published publicatie alongside the concept one from the Background, so
+  // filtering on "Concept" actually excludes something.
+  const orgNaam = await organisations.add()
+  const publishedTitel = publications.freshName()
+  await addPublishedPublication(page, publishedTitel, orgNaam)
+  publications.track(publishedTitel)
+  await openPublicationChangelist(page, PUBLICATIE_PREFIX)
+  await page.locator('#changelist-filter').getByRole('link', { name: 'Concept', exact: true }).click()
+})
+
+Then('only {string} publicaties are shown in the results', async ({ page }, status: string) => {
+  const rows = page.locator('#result_list tbody tr')
+  const count = await rows.count()
+  expect(count).toBeGreaterThan(0)
+  for (let i = 0; i < count; i++)
+    await expect(rows.nth(i).locator('td.field-publicatiestatus')).toHaveText(status)
+})
+
+// --- Overview "Toon logs" link (distinct from the detail page's button) ----
+
+When(
+  'I open the {string} link for the publicatie from the overview',
+  async ({ page, publications }, linkName: string) => {
+    await page.goto(`${resource.changelistUrl()}?q=${encodeURIComponent(publications.last())}`)
+    await page.getByRole('row', { name: publications.last() }).getByRole('link', { name: linkName }).click()
+  },
+)
+
+Then('I see audit log entries for the publicatie', async ({ page, publications }) => {
+  await expect(page).toHaveURL(/\/admin\/logging\/timelinelogproxy\//)
+  const rows = page.locator('#result_list tbody tr')
+  await expect(rows.first()).toBeVisible()
+  await expect(rows.first()).toContainText(publications.last())
 })

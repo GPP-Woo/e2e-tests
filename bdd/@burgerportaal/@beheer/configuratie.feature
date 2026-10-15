@@ -116,3 +116,29 @@ Feature: Configureren van het burgerportaal
     When I remove the "privacy" footer link
     And I publish the external links
     Then the public "privacy" footer link is no longer shown
+
+  # Matrix "Change/remove the Accessibility footer link": same behaviour, second field.
+  Scenario: Voettekst-link toegankelijkheid wijzigen en verwijderen
+    When I set the "toegankelijkheid" footer link to "https://e2e.example.org/toegankelijkheid"
+    And I publish the external links
+    Then the public "toegankelijkheid" footer link points to the new URL
+    When I remove the "toegankelijkheid" footer link
+    And I publish the external links
+    Then the public "toegankelijkheid" footer link is no longer shown
+
+  # Matrix "Change/remove the Contact footer link": same behaviour, third field.
+  Scenario: Voettekst-link contact wijzigen en verwijderen
+    When I set the "contact" footer link to "https://e2e.example.org/contact"
+    And I publish the external links
+    Then the public "contact" footer link points to the new URL
+    When I remove the "contact" footer link
+    And I publish the external links
+    Then the public "contact" footer link is no longer shown
+
+  # Matrix "Promotion video help": the "?" popover explains the supported URL format
+  # (manual TS1 step 4: "Click the ? button next to the field for instructions").
+  Scenario: Promotievideo help toont de ondersteunde URL-indeling
+    When I open the homepage settings in the beheer interface
+    And I open the help for the promotion video URL
+    Then the promotion video help explains that YouTube and Vimeo URLs are supported
+    And the promotion video help explains that an embed URL must be used

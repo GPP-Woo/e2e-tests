@@ -28,6 +28,7 @@ import {
   intrekkenDialog,
   openCollegaPublicatieViaUi,
   openMijnPublicaties,
+  openNieuwePublicatieAndSelectProfielViaUi,
   openOptionGroup,
   openPublicatieViaUi,
   optionGroupError,
@@ -85,6 +86,17 @@ When('I create and publish a publicatie through the gpp-app', async ({ page, pub
   })
   // Track for cleanup + so the assertion knows which titel to read back.
   publications.track(titel)
+})
+
+When('I open a new publicatie form', async ({ page, scratch }) => {
+  await openNieuwePublicatieAndSelectProfielViaUi(page, scratch.get('profielUuid')!)
+})
+
+Then('the organisatie and informatiecategorie are already selected', async ({ page, scratch }) => {
+  await openOptionGroup(page, 'Organisatie')
+  await expect(page.locator(`input[type="radio"][value="${scratch.get('organisatieUuid')}"]`)).toBeChecked()
+  await openOptionGroup(page, 'Informatiecategorie')
+  await expect(page.locator(`input[type="checkbox"][value="${scratch.get('informatiecategorieUuid')}"]`)).toBeChecked()
 })
 
 Then('the publicatie is public on the burgerportaal', async ({ page, publications }) => {

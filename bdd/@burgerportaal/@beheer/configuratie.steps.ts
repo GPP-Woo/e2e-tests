@@ -151,6 +151,30 @@ Then('the public homepage has no promotion video', async ({ beheer }) => {
   await expect.poll(() => resource(beheer, 'videoUrl'), POLL).toBe('')
 })
 
+When('I open the homepage settings in the beheer interface', async ({ page }) => {
+  await openBeheer(page, 'Homepage')
+})
+
+/**
+ * The "?" next to the video URL field (GppWooInfoPopover.vue) opens a native
+ * `popover` element with `role="tooltip"`; `.gpp-woo-info-popover__trigger` is
+ * the trigger class set on that specific field in BeheerHomeView.vue.
+ */
+When('I open the help for the promotion video URL', async ({ page }) => {
+  await page.locator('.gpp-woo-info-popover__trigger').click()
+})
+
+Then('the promotion video help explains that YouTube and Vimeo URLs are supported', async ({ page }) => {
+  const tooltip = page.getByRole('tooltip')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toContainText(/YouTube/i)
+  await expect(tooltip).toContainText(/Vimeo/i)
+})
+
+Then('the promotion video help explains that an embed URL must be used', async ({ page }) => {
+  await expect(page.getByRole('tooltip')).toContainText(/embed/i)
+})
+
 // --- Afbeeldingen (logo / favicon / sfeerfoto) -----------------------------
 
 When('I replace the {string} image', async ({ beheer, beheerState }, kind: string) => {

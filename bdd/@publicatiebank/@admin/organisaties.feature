@@ -57,6 +57,16 @@ Feature: Configureren van organisaties
     When I list the active organisaties in the admin
     Then the same organisaties are available in the GPP-app gebruikersgroep waardelijst
 
+  # Manual TS4: "Bij een organisatie uit een landelijke waardenlijst kan alleen
+  # het RSIN worden opgenomen. De andere velden zijn overgenomen uit de
+  # landelijke waardenlijst en kunnen dus niet gewijzigd worden." Only testable
+  # against a real waardelijst record — self-added organisaties are always
+  # fully editable, so the other scenarios above cannot exercise this.
+  Scenario: A waardelijst organisatie only allows its RSIN to be changed
+    When I open a waardelijst organisatie
+    Then its naam and oorsprong fields are read-only
+    And its RSIN field is editable
+
   Scenario: Editing a self-added organisatie is logged
     Given a self-added organisatie
     When I rename the organisatie and save it

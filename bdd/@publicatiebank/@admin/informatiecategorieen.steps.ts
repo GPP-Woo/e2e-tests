@@ -257,3 +257,63 @@ When('I open the {string} via the {string} tab', async ({ page }, section: strin
 Then('the deletion of the information category is recorded in the audit log', async ({ page, categories }) => {
   await expect.poll(() => auditEntryCount(page, categories.last(), 'delete'), READ).toBeGreaterThan(0)
 })
+
+// --- Overview "Toon logs" link (distinct from the detail page's button) ----
+
+When(
+  'I open the {string} link for the self-added information category from the overview',
+  async ({ page, categories }, linkName: string) => {
+    const row = page.getByRole('row', { name: categories.last() })
+    await row.getByRole('link', { name: linkName }).click()
+  },
+)
+
+Then('I see audit log entries for the self-added information category', async ({ page, categories }) => {
+  await expect(page).toHaveURL(/\/admin\/logging\/timelinelogproxy\//)
+  const rows = page.locator('#result_list tbody tr')
+  await expect(rows.first()).toBeVisible()
+  await expect(rows.first()).toContainText(categories.last())
+})
+
+// --- Audit logitems: search / filter / sort ---------------------------------
+
+When('I search the audit log for the self-added information category', async ({ page, categories }) => {
+  await search(page, categories.last())
+})
+
+Then('only entries mentioning the self-added information category are shown', async ({ page, categories }) => {
+  const rows = page.locator('#result_list tbody tr')
+  const count = await rows.count()
+  expect(count).toBeGreaterThan(0)
+  for (let i = 0; i < count; i++)
+    await expect(rows.nth(i)).toContainText(categories.last())
+})
+
+When('I filter the audit log by the {string} event', async ({ page }, eventLabel: string) => {
+  await page.locator('#changelist-filter').getByRole('link', { name: eventLabel, exact: true }).click()
+})
+
+Then('every audit log result is a {string} event', async ({ page }, eventLabel: string) => {
+  const rows = page.locator('#result_list tbody tr')
+  const count = await rows.count()
+  expect(count).toBeGreaterThan(0)
+  for (let i = 0; i < count; i++)
+    await expect(rows.nth(i)).toContainText(eventLabel)
+})
+
+/**
+ * Default ordering is `-timestamp` (newest first); clicking the column header
+ * once applies Django admin's default ascending sort — the reverse — which is
+ * enough to prove the control works without needing a second toggle click (that
+ * would flip back to descending, i.e. the same order the list started in).
+ */
+When('I sort the audit log by {string}', async ({ page, scratch }, column: string) => {
+  scratch.set('log:before', JSON.stringify(await page.locator('#result_list tbody tr').allTextContents()))
+  await page.locator('#result_list thead').getByRole('link', { name: column, exact: true }).click()
+})
+
+Then('the audit log order changes', async ({ page, scratch }) => {
+  const before = JSON.parse(scratch.get('log:before')!) as string[]
+  const after = await page.locator('#result_list tbody tr').allTextContents()
+  expect(after).not.toEqual(before)
+})
